@@ -1,0 +1,23 @@
+[project]
+name = "keitaro-campaign-manager-backend"
+version = "0.1.0"
+description = "Backend for the Keitaro Campaign Manager"
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["."]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    # starlette 1.10 deprecates its httpx-based TestClient; respx still
+    # requires httpx, so keep the current client and silence the notice.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
+
