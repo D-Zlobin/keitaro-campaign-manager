@@ -3,9 +3,11 @@
 Web application that creates Keitaro campaigns with a predefined two-stream
 structure and edits streams and offer associations of existing campaigns.
 See `docs/spec.md` (source of truth) and `docs/plan.md` (implementation
-stages). Current status: **stages 0–2 complete** (scaffold and Keitaro
+stages). Current status: **stages 0–3 complete** (scaffold and Keitaro
 contract verification; persistence, baselines, and synchronization
-metadata; domain share calculation, canonicalization, and update planning).
+metadata; domain share calculation, canonicalization, and update planning;
+Keitaro adapter with bounded retries, pagination, and fetch normalization,
+plus the Five API Geo/offer adapters).
 
 ## Layout
 
@@ -99,13 +101,18 @@ Confirmed on the target instance:
   `/stream_filters`, or `/version` endpoints — action/schema/filter names
   are adapter constants, not discoverable metadata.
 
-Open items (not blockers for stages 1–2):
+Open items (not blockers for stages 4–6):
 
 - **Redirect representation** (`action_payload` URL string vs
   `action_options`) needs one write test on a disposable campaign, or an
   operator check of the admin UI, before the first live creation. Both
   variants are implemented (`redirect_via` in `payloads.py`).
-- **Five API** (offer autocomplete upstream): contract defined
-  (`GET /offers`, `GET /geos` in `app/api/schemas.py`), credentials/config
-  are server-only settings; upstream auth, search params, and the mapping
-  to Keitaro offer IDs remain unverified pending Five API docs/credentials.
+- **Five API** (Geo list + offer autocomplete upstream): implemented in
+  `backend/app/five/` against an assumed contract (bearer auth,
+  `GET /geos` → `[{code, name}]`, `GET /offers?search=` →
+  `[{keitaro_offer_id, name}]`; see the package docstring). Auth shape,
+  search parameters, and the Keitaro offer-ID mapping remain unverified
+  pending Five API docs/credentials — adjust `app/five/models.py` when
+  confirmed. Credentials are server-only settings and never reach the
+  browser; adapters retry safe reads only and redact the key from errors
+  and logs.
