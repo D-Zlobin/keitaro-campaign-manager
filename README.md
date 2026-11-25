@@ -3,8 +3,9 @@
 Web application that creates Keitaro campaigns with a predefined two-stream
 structure and edits streams and offer associations of existing campaigns.
 See `docs/spec.md` (source of truth) and `docs/plan.md` (implementation
-stages). Current status: **stage 0 complete** (scaffold and Keitaro contract
-verification).
+stages). Current status: **stages 0–1 complete** (scaffold and Keitaro
+contract verification; persistence, baselines, and synchronization
+metadata).
 
 ## Layout
 
@@ -39,6 +40,21 @@ error when a required value is missing or invalid (`app/config.py`).
 Health check: `GET /api/v1/health` → `{"status": "ok"}` (no secrets).
 Errors use the envelope `{"error": {"code", "message", "details"}}`.
 CORS allows only `CORS_ALLOWED_ORIGINS` (default `http://localhost:5173`).
+
+### Database
+
+SQLite via `DATABASE_URL`. SQLAlchemy models live in `app/db/models.py`;
+repositories (draft/baseline/idempotency/sync-state) in `app/repositories/`.
+Every connection enables foreign keys and a busy timeout
+(`app/db/engine.py`). Migrations are Alembic:
+
+```bash
+.venv/bin/alembic upgrade head     # apply migrations (URL from DATABASE_URL)
+.venv/bin/alembic downgrade base   # roll back
+```
+
+Tests migrate a per-test SQLite file through the same Alembic environment,
+then connect with the production engine builder.
 
 ## Frontend
 
