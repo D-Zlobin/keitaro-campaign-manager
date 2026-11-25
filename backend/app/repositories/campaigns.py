@@ -99,6 +99,10 @@ class CampaignRepository:
         stmt = sa.select(Campaign).order_by(Campaign.name, Campaign.keitaro_id)
         return list(session.scalars(stmt))
 
+    def get_by_keitaro_id(self, session: Session, keitaro_id: int) -> Campaign | None:
+        stmt = sa.select(Campaign).where(Campaign.keitaro_id == keitaro_id)
+        return session.scalars(stmt).first()
+
     def require(self, session: Session, campaign_id: uuid.UUID) -> Campaign:
         campaign = session.get(Campaign, campaign_id)
         if campaign is None:

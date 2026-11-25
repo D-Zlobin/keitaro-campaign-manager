@@ -161,6 +161,28 @@ def test_baseline_payload_preserves_raw_remote_stream() -> None:
     assert payload["offers"][0]["id"] == 693
 
 
+def test_offer_baseline_payload_preserves_raw_association() -> None:
+    result = normalize_fetch([landings()])
+    offer = result.streams[0].offers[0]
+    assert offer.baseline_payload is not None
+    assert offer.baseline_payload["id"] == 693
+    assert offer.baseline_payload["offer_id"] == 18001
+    assert offer.baseline_payload["share"] == 100
+
+
+def test_offer_baseline_payload_keeps_raw_share_after_normalization() -> None:
+    skewed = landings(
+        offers=[
+            {"id": 693, "offer_id": 18001, "state": "active", "share": 30},
+            {"id": 694, "offer_id": 18002, "state": "active", "share": 30},
+        ]
+    )
+    result = normalize_fetch([skewed])
+    offers = result.streams[0].offers
+    assert [offer.share for offer in offers] == [50, 50]  # normalized draft
+    assert [offer.baseline_payload["share"] for offer in offers] == [30, 30]  # raw baseline
+
+
 def test_non_offer_stream_offers_pass_through_untouched() -> None:
     redirect_with_offers = redirect(
         weight=100,

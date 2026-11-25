@@ -3,11 +3,12 @@
 Web application that creates Keitaro campaigns with a predefined two-stream
 structure and edits streams and offer associations of existing campaigns.
 See `docs/spec.md` (source of truth) and `docs/plan.md` (implementation
-stages). Current status: **stages 0–3 complete** (scaffold and Keitaro
+stages). Current status: **stages 0–4 complete** (scaffold and Keitaro
 contract verification; persistence, baselines, and synchronization
 metadata; domain share calculation, canonicalization, and update planning;
 Keitaro adapter with bounded retries, pagination, and fetch normalization,
-plus the Five API Geo/offer adapters).
+plus the Five API Geo/offer adapters; campaign creation with idempotency
+and compensating cleanup, import, and operator-initiated fetch).
 
 ## Layout
 
@@ -42,6 +43,29 @@ error when a required value is missing or invalid (`app/config.py`).
 Health check: `GET /api/v1/health` → `{"status": "ok"}` (no secrets).
 Errors use the envelope `{"error": {"code", "message", "details"}}`.
 CORS allows only `CORS_ALLOWED_ORIGINS` (default `http://localhost:5173`).
+
+### Application API (stage 4)
+
+- `GET /api/v1/campaigns` — list locally known campaigns (name, Keitaro ID,
+  sync state, revision, last fetch/upload times).
+- `POST /api/v1/campaigns` — create a campaign remotely and locally.
+  Requires an `Idempotency-Key` header: replaying the same key returns the
+  recorded result (success or failure) without new remote work; reusing a
+  key with a different payload is a 409. Body: `{name, country_code,
+  offer_id}` (name trimmed, country normalized to uppercase ISO 3166-1
+  alpha-2). Before any write the backend validates the configured
+  domain/group/traffic source and offer availability; on incomplete setup
+  it stops and attempts a compensating campaign archive, reporting
+  `keitaro_campaign_id` and `cleanup_status` in the error details.
+- `POST /api/v1/campaigns/import` — import by `{keitaro_campaign_id}`;
+  duplicate imports are a 409 and never replace existing state.
+- `POST /api/v1/campaigns/{id}/fetch` — operator-initiated fetch replacing
+  baseline and draft (pins cleared, revision incremented, normalization
+  notices returned). A dirty or `needs_attention` draft requires
+  `{"confirm_discard": true}`; without it the fetch is a 409.
+
+The draft editor endpoints (`GET /campaigns/{id}`, draft mutations, offer
+and Geo selectors) arrive in stage 5; upload arrives in stage 6.
 
 ### Database
 

@@ -45,6 +45,9 @@ class NormalizedOffer:
     keitaro_association_id: int | None
     state: OfferAssociationState
     share: int
+    # Raw remote association, kept as the baseline snapshot for fingerprints,
+    # partial updates, and rollback compensation (spec section 10).
+    baseline_payload: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +97,7 @@ def _normalize_offers(
         )
 
     dirty = False
+    raw_by_id = {association.id: association for association in stream.offers}
     entries = [to_entry(association) for association in stream.offers]
     if offer_capable and stream_state is StreamState.ACTIVE and entries:
         active = [a for a in stream.offers if a.state == OfferAssociationState.ACTIVE.value]
@@ -108,6 +112,11 @@ def _normalize_offers(
             )
             dirty = True
             entries = redistribute_offer_shares(entries)
+
+    def baseline_payload(entry: OfferEntry) -> dict[str, Any] | None:
+        raw = raw_by_id.get(entry.keitaro_association_id)
+        return raw.model_dump(by_alias=True) if raw is not None else None
+
     return (
         tuple(
             NormalizedOffer(
@@ -116,6 +125,7 @@ def _normalize_offers(
                 keitaro_association_id=entry.keitaro_association_id,
                 state=entry.state,
                 share=entry.share,
+                baseline_payload=baseline_payload(entry),
             )
             for entry in entries
         ),

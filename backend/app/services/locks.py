@@ -1,17 +1,24 @@
-"""In-process per-campaign upload locks (plan stage 1).
+"""In-process coordination locks (plan stages 1 and 4).
 
 Deployment is a single backend process, so one ``asyncio.Lock`` per campaign
-coordinates active upload work. The lock only covers live operations; the
-durable ``sync_state`` on the campaign row (including ``needs_attention``) is
-what survives failures and restarts and blocks unsafe uploads afterwards.
+coordinates active upload/fetch work. The lock only covers live operations;
+the durable ``sync_state`` on the campaign row (including ``needs_attention``)
+is what survives failures and restarts and blocks unsafe uploads afterwards.
+
+Creation idempotency uses a separate threading lock keyed by the
+``Idempotency-Key`` string: campaign creation runs in worker threads (sync
+service code), and the lock guarantees at most one creation sequence per key
+even when duplicate requests arrive concurrently. The database unique
+constraint on the idempotency record remains the backstop.
 """
 
 from __future__ import annotations
 
 import asyncio
+import threading
 import uuid
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Hashable, Iterator
+from contextlib import asynccontextmanager, contextmanager
 
 
 class UploadLockManager:
@@ -41,4 +48,31 @@ class UploadLockManager:
 
     def is_locked(self, campaign_id: uuid.UUID) -> bool:
         lock = self._locks.get(campaign_id)
+        return lock is not None and lock.locked()
+
+
+class KeyedLock:
+    """Threading mutual exclusion keyed by an arbitrary hashable value.
+
+    Used from synchronous service code running in worker threads. Locks are
+    kept for the manager's lifetime; the key space (idempotency keys) is
+    bounded by operator activity, so no eviction is needed.
+    """
+
+    def __init__(self) -> None:
+        self._locks: dict[Hashable, threading.Lock] = {}
+        self._guard = threading.Lock()
+
+    @contextmanager
+    def acquire(self, key: Hashable) -> Iterator[None]:
+        with self._guard:
+            lock = self._locks.setdefault(key, threading.Lock())
+        lock.acquire()
+        try:
+            yield
+        finally:
+            lock.release()
+
+    def is_locked(self, key: Hashable) -> bool:
+        lock = self._locks.get(key)
         return lock is not None and lock.locked()

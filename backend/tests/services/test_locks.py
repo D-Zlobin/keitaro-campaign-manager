@@ -1,11 +1,12 @@
-"""Per-campaign upload lock: serialization and isolation."""
+"""Per-campaign upload lock and keyed creation lock."""
 
 from __future__ import annotations
 
 import asyncio
+import threading
 import uuid
 
-from app.services.locks import UploadLockManager
+from app.services.locks import KeyedLock, UploadLockManager
 
 
 def _run(coro) -> None:
@@ -89,3 +90,64 @@ def test_is_locked_reflects_state() -> None:
         assert not manager.is_locked(campaign_id)
 
     _run(main())
+
+
+def test_keyed_lock_same_key_serializes_threads() -> None:
+    locks = KeyedLock()
+    order: list[str] = []
+    entered = threading.Event()
+
+    def first() -> None:
+        with locks.acquire("key"):
+            order.append("first:in")
+            entered.set()
+            threading.Event().wait(0.02)
+            order.append("first:out")
+
+    def second() -> None:
+        entered.wait(1)
+        with locks.acquire("key"):
+            order.append("second:in")
+
+    threads = [threading.Thread(target=first), threading.Thread(target=second)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert order == ["first:in", "first:out", "second:in"]
+
+
+def test_keyed_lock_different_keys_do_not_block() -> None:
+    locks = KeyedLock()
+    both_in = threading.Barrier(2, timeout=2)
+
+    def worker(key: str) -> None:
+        with locks.acquire(key):
+            both_in.wait()  # deadlocks unless both keys are held concurrently
+
+    threads = [threading.Thread(target=worker, args=(key,)) for key in ("a", "b")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not any(thread.is_alive() for thread in threads)
+
+
+def test_keyed_lock_released_on_exception() -> None:
+    locks = KeyedLock()
+
+    def failing() -> None:
+        with locks.acquire("key"):
+            raise RuntimeError("boom")
+
+    try:
+        failing()
+    except RuntimeError:
+        pass
+    assert not locks.is_locked("key")
+
+    with locks.acquire("key"):
+        assert locks.is_locked("key")
+    assert not locks.is_locked("key")

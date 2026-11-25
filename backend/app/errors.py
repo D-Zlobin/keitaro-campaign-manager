@@ -15,6 +15,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.repositories.exceptions import CampaignNotFoundError, StaleRevisionError
+from app.repositories.idempotency import IdempotencyPayloadConflict
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,6 +40,11 @@ class AppError(Exception):
             self.status_code = status_code
         if code is not None:
             self.code = code
+
+
+class BadRequestError(AppError):
+    status_code = status.HTTP_400_BAD_REQUEST
+    code = "bad_request"
 
 
 class NotFoundError(AppError):
@@ -91,6 +99,40 @@ def register_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content=error_body("bad_request", "Malformed request.", details),
+        )
+
+    # Persistence-layer exceptions translate to the same envelope so services
+    # can let them propagate instead of re-wrapping them at every call site.
+    @app.exception_handler(CampaignNotFoundError)
+    async def campaign_not_found_handler(_: Request, exc: CampaignNotFoundError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=error_body(
+                "not_found", "Campaign not found.", {"campaign_id": str(exc.campaign_id)}
+            ),
+        )
+
+    @app.exception_handler(StaleRevisionError)
+    async def stale_revision_handler(_: Request, exc: StaleRevisionError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=error_body(
+                "stale_revision",
+                "The local draft changed in another request. Reload the latest draft and retry.",
+                {"expected_revision": exc.expected, "actual_revision": exc.actual},
+            ),
+        )
+
+    @app.exception_handler(IdempotencyPayloadConflict)
+    async def idempotency_conflict_handler(
+        _: Request, exc: IdempotencyPayloadConflict
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=error_body(
+                "idempotency_payload_conflict",
+                "This Idempotency-Key was already used with a different request payload.",
+            ),
         )
 
     @app.exception_handler(StarletteHTTPException)
