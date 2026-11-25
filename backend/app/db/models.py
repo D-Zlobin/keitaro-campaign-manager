@@ -16,7 +16,6 @@ duplicating.
 
 from __future__ import annotations
 
-import enum
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -35,52 +34,38 @@ from sqlalchemy import (
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-SHA256_HEX_LENGTH = 64
-
-
-def _enum_values(enum_class: type[enum.Enum]) -> list[str]:
-    """Persist str-enum values (e.g. ``active``), not member names."""
-    return [member.value for member in enum_class]
-
-
-def _enum_sql_values(enum_class: type[enum.Enum]) -> str:
-    return ", ".join(f"'{member.value}'" for member in enum_class)
+from app.domain.canonical import SHA256_HEX_LENGTH
+from app.domain.states import (
+    BaselineSource,
+    IdempotencyState,
+    OfferAssociationState,
+    StreamState,
+    SyncState,
+    enum_sql_values,
+    enum_values,
+)
 
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-class StreamState(enum.StrEnum):
-    ACTIVE = "active"
-    DISABLED = "disabled"
-
-
-class OfferAssociationState(enum.StrEnum):
-    ACTIVE = "active"
-    DISABLED = "disabled"
-
-
-class SyncState(enum.StrEnum):
-    """Synchronization state of one campaign; ``needs_attention`` persists
-    across restarts and blocks further uploads until a recovery fetch."""
-
-    CLEAN = "clean"
-    DIRTY = "dirty"
-    SYNCING = "syncing"
-    NEEDS_ATTENTION = "needs_attention"
-
-
-class BaselineSource(enum.StrEnum):
-    CREATE = "create"
-    FETCH = "fetch"
-    UPLOAD = "upload"
-
-
-class IdempotencyState(enum.StrEnum):
-    IN_PROGRESS = "in_progress"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
+# Enum definitions live in ``app.domain.states`` and are re-exported here for
+# backwards compatibility with stage-1 imports.
+__all__ = [
+    "BaselineSource",
+    "Base",
+    "BaselineSnapshot",
+    "Campaign",
+    "IdempotencyRecord",
+    "IdempotencyState",
+    "OfferAssociationState",
+    "Stream",
+    "StreamOffer",
+    "StreamState",
+    "SyncState",
+    "utcnow",
+]
 
 
 class TimestampMixin:
@@ -98,7 +83,7 @@ class Campaign(TimestampMixin, Base):
     __tablename__ = "campaigns"
     __table_args__ = (
         CheckConstraint(
-            f"sync_state IN ({_enum_sql_values(SyncState)})", name="ck_campaigns_sync_state"
+            f"sync_state IN ({enum_sql_values(SyncState)})", name="ck_campaigns_sync_state"
         ),
     )
 
@@ -114,7 +99,7 @@ class Campaign(TimestampMixin, Base):
             native_enum=False,
             validate_strings=True,
             length=20,
-            values_callable=_enum_values,
+            values_callable=enum_values,
         ),
         default=SyncState.CLEAN,
     )
@@ -147,7 +132,7 @@ class Stream(TimestampMixin, Base):
         CheckConstraint("share >= 0 AND share <= 100", name="ck_streams_share_range"),
         CheckConstraint("position >= 0", name="ck_streams_position_non_negative"),
         CheckConstraint("keitaro_id > 0", name="ck_streams_keitaro_id_positive"),
-        CheckConstraint(f"state IN ({_enum_sql_values(StreamState)})", name="ck_streams_state"),
+        CheckConstraint(f"state IN ({enum_sql_values(StreamState)})", name="ck_streams_state"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -167,7 +152,7 @@ class Stream(TimestampMixin, Base):
             native_enum=False,
             validate_strings=True,
             length=16,
-            values_callable=_enum_values,
+            values_callable=enum_values,
         )
     )
     share: Mapped[int] = mapped_column(Integer)
@@ -189,7 +174,7 @@ class StreamOffer(TimestampMixin, Base):
         CheckConstraint("share >= 0 AND share <= 100", name="ck_stream_offers_share_range"),
         CheckConstraint("offer_id > 0", name="ck_stream_offers_offer_id_positive"),
         CheckConstraint(
-            f"state IN ({_enum_sql_values(OfferAssociationState)})",
+            f"state IN ({enum_sql_values(OfferAssociationState)})",
             name="ck_stream_offers_state",
         ),
     )
@@ -208,7 +193,7 @@ class StreamOffer(TimestampMixin, Base):
             native_enum=False,
             validate_strings=True,
             length=16,
-            values_callable=_enum_values,
+            values_callable=enum_values,
         )
     )
     share: Mapped[int] = mapped_column(Integer)
@@ -228,7 +213,7 @@ class BaselineSnapshot(TimestampMixin, Base):
     __tablename__ = "baseline_snapshots"
     __table_args__ = (
         CheckConstraint(
-            f"source IN ({_enum_sql_values(BaselineSource)})",
+            f"source IN ({enum_sql_values(BaselineSource)})",
             name="ck_baseline_snapshots_source",
         ),
     )
@@ -245,7 +230,7 @@ class BaselineSnapshot(TimestampMixin, Base):
             native_enum=False,
             validate_strings=True,
             length=16,
-            values_callable=_enum_values,
+            values_callable=enum_values,
         )
     )
 
@@ -264,7 +249,7 @@ class IdempotencyRecord(TimestampMixin, Base):
     __tablename__ = "idempotency_records"
     __table_args__ = (
         CheckConstraint(
-            f"state IN ({_enum_sql_values(IdempotencyState)})",
+            f"state IN ({enum_sql_values(IdempotencyState)})",
             name="ck_idempotency_records_state",
         ),
     )
@@ -278,7 +263,7 @@ class IdempotencyRecord(TimestampMixin, Base):
             native_enum=False,
             validate_strings=True,
             length=16,
-            values_callable=_enum_values,
+            values_callable=enum_values,
         ),
         default=IdempotencyState.IN_PROGRESS,
     )

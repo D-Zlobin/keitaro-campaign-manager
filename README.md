@@ -3,9 +3,9 @@
 Web application that creates Keitaro campaigns with a predefined two-stream
 structure and edits streams and offer associations of existing campaigns.
 See `docs/spec.md` (source of truth) and `docs/plan.md` (implementation
-stages). Current status: **stages 0–1 complete** (scaffold and Keitaro
+stages). Current status: **stages 0–2 complete** (scaffold and Keitaro
 contract verification; persistence, baselines, and synchronization
-metadata).
+metadata; domain share calculation, canonicalization, and update planning).
 
 ## Layout
 
