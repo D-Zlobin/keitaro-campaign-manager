@@ -24,12 +24,14 @@ from app.api.schemas import (
     CampaignFetchResponse,
     CampaignImportRequest,
     CampaignListResponse,
+    CampaignUploadResponse,
     DraftUpdateRequest,
 )
 from app.errors import BadRequestError
 from app.services.campaigns import CampaignService, CreateCampaignCommand
 from app.services.drafts import DraftService
 from app.services.locks import UploadLockManager
+from app.services.uploads import UploadService
 
 router = APIRouter(tags=["campaigns"])
 
@@ -40,6 +42,10 @@ def _service(request: Request) -> CampaignService:
 
 def _draft_service(request: Request) -> DraftService:
     return request.app.state.draft_service
+
+
+def _upload_service(request: Request) -> UploadService:
+    return request.app.state.upload_service
 
 
 @router.get("/campaigns", response_model=CampaignListResponse)
@@ -103,3 +109,17 @@ async def update_campaign_draft(
             expected_revision=payload.expected_revision,
             command=payload.command,
         )
+
+
+@router.post("/campaigns/{campaign_id}/upload", response_model=CampaignUploadResponse)
+async def upload_campaign(campaign_id: uuid.UUID, request: Request) -> CampaignUploadResponse:
+    """Push the persisted dirty draft to Keitaro (spec section 7.2).
+
+    Operates only on the persisted draft — there is no request body to trust.
+    Fingerprint preflight is optimistic conflict detection: Keitaro updates
+    are not atomic and a remote write between preflight and our updates
+    cannot be detected.
+    """
+    locks: UploadLockManager = request.app.state.upload_locks
+    async with locks.acquire(campaign_id):
+        return await run_in_threadpool(_upload_service(request).upload_campaign, campaign_id)

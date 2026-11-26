@@ -3,12 +3,14 @@
 Web application that creates Keitaro campaigns with a predefined two-stream
 structure and edits streams and offer associations of existing campaigns.
 See `docs/spec.md` (source of truth) and `docs/plan.md` (implementation
-stages). Current status: **stages 0–4 complete** (scaffold and Keitaro
+stages). Current status: **stages 0–6 complete** (scaffold and Keitaro
 contract verification; persistence, baselines, and synchronization
 metadata; domain share calculation, canonicalization, and update planning;
 Keitaro adapter with bounded retries, pagination, and fetch normalization,
 plus the Five API Geo/offer adapters; campaign creation with idempotency
-and compensating cleanup, import, and operator-initiated fetch).
+and compensating cleanup, import, and operator-initiated fetch; the
+revision-safe draft editing API; conflict-checked upload with rollback and
+`needs_attention` recovery).
 
 ## Layout
 
@@ -45,7 +47,7 @@ Health check: `GET /api/v1/health` → `{"status": "ok"}` (no secrets).
 Errors use the envelope `{"error": {"code", "message", "details"}}`.
 CORS allows only `CORS_ALLOWED_ORIGINS` (default `http://localhost:5173`).
 
-### Application API (stage 5)
+### Application API
 
 - `GET /api/v1/campaigns` — list locally known campaigns (name, Keitaro ID,
   sync state, revision, last fetch/upload times).
@@ -84,7 +86,31 @@ CORS allows only `CORS_ALLOWED_ORIGINS` (default `http://localhost:5173`).
   together) offers already active in that stream are excluded; disabled
   associations stay selectable for reactivation.
 
-Upload arrives in stage 6.
+- `POST /api/v1/campaigns/{id}/upload` — push the persisted dirty draft to
+  Keitaro (no request body; the client never supplies a campaign snapshot).
+  Before any write the backend re-reads the draft, validates it, and
+  compares a fingerprint of the current remote state with the stored
+  baseline: a mismatch is a 409 `remote_conflict` with zero remote writes.
+  Only changed managed fields are sent as per-stream partial updates.
+  - A clean draft is a 409 `clean_draft`; `syncing`/`needs_attention`
+    campaigns are 409; an invalid persisted draft is a 422 `invalid_draft`.
+  - On a write failure the attempted updates are compensated in reverse
+    order and the rollback is verified with a fresh read: confirmed
+    rollback returns 502 `upload_failed` and keeps the draft dirty;
+    unconfirmed rollback persists `needs_attention` (surviving restarts),
+    blocks uploads and draft edits, and requires a confirmed recovery
+    fetch. A crash mid-upload leaves `syncing`, which startup resets to
+    `dirty`; the next preflight detects any partial writes.
+  - After successful writes the backend fetches the result and replaces
+    baseline and draft; the response is clean only when the fetched state
+    matches the uploaded values exactly. Normalization or divergence keeps
+    the draft dirty with explanatory `notices` — never a false success.
+
+**Synchronization is not atomic.** The fingerprint preflight is optimistic
+conflict detection: Keitaro has no compare-and-set, so a remote write
+landing between the preflight and our updates cannot be detected, and a
+multi-stream upload can partially apply (the rollback above is the
+mitigation). Do not present synchronization as transactional in the UI.
 
 ### Database
 

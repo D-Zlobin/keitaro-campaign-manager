@@ -14,6 +14,7 @@ catalog integration (Geo list and offer autocomplete).
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import Any
 
 from app.api.schemas import GeoOption, OfferOption
@@ -24,6 +25,7 @@ from app.keitaro.models import (
     KeitaroDomain,
     KeitaroGroup,
     KeitaroOffer,
+    KeitaroOfferAssociation,
     KeitaroStream,
     KeitaroTrafficSource,
 )
@@ -62,10 +64,16 @@ class FakeKeitaroAdapter:
         self.calls: list[str] = []
         self.campaign_payloads: list[dict[str, Any]] = []
         self.stream_payloads: list[dict[str, Any]] = []
+        # Exact (stream_id, payload) pairs of every update_stream call, in order.
+        self.update_payloads: list[tuple[int, dict[str, Any]]] = []
         # Queued outcomes per operation: each call pops one entry; a non-None
         # entry is raised, None lets the call succeed.
         self.fail_queue: dict[str, list[Exception | None]] = {}
         self.create_campaign_delay = 0.0
+        # Invoked after every successful update_stream; lets tests simulate
+        # remote drift or Keitaro applying different values inside the
+        # non-atomic window between the preflight and the post-upload fetch.
+        self.post_write_hook: Callable[[FakeKeitaroAdapter], None] | None = None
 
         self._next_campaign_id = 500
         self._next_stream_id = 900
@@ -316,14 +324,56 @@ class FakeKeitaroAdapter:
 
     def update_stream(self, stream_id: int, payload: StreamUpdatePayload) -> KeitaroStream:
         self.calls.append("update_stream")
+        self.update_payloads.append((stream_id, payload.to_api_dict()))
         self._maybe_fail("update_stream")
         stream = self.streams.get(stream_id)
         if stream is None:
             raise KeitaroResponseError("update_stream", 404, "stream not found")
         changes = payload.to_api_dict()
         changes.pop("filters", None)
-        changes.pop("offers", None)
-        return self.touch_stream(stream_id, **changes)
+        offers = changes.pop("offers", None)
+        updated = self.touch_stream(stream_id, **changes)
+        if offers is not None:
+            self._apply_offer_updates(stream_id, offers)
+            updated = self.streams[stream_id]
+        if self.post_write_hook is not None:
+            self.post_write_hook(self)
+            updated = self.streams[stream_id]
+        return updated
+
+    def _apply_offer_updates(self, stream_id: int, offers: list[dict[str, Any]]) -> None:
+        """Upsert nested association payloads by offer ID, like Keitaro."""
+        stream = self.streams[stream_id]
+        associations = list(stream.offers)
+        by_offer = {association.offer_id: association for association in associations}
+        now = self._tick()
+        for offer_payload in offers:
+            existing = by_offer.get(offer_payload["offer_id"])
+            if existing is None:
+                self._next_association_id += 1
+                associations.append(
+                    KeitaroOfferAssociation(
+                        id=self._next_association_id,
+                        offer_id=offer_payload["offer_id"],
+                        state=offer_payload.get("state", "active"),
+                        share=offer_payload.get("share", 0),
+                        stream_id=stream_id,
+                        created_at=now,
+                        updated_at=None,
+                    )
+                )
+            else:
+                index = associations.index(existing)
+                associations[index] = existing.model_copy(
+                    update={
+                        "state": offer_payload.get("state", existing.state),
+                        "share": offer_payload.get("share", existing.share),
+                        "updated_at": now,
+                    }
+                )
+        self.streams[stream_id] = stream.model_copy(
+            update={"offers": associations, "updated_at": now}
+        )
 
     def disable_stream(self, stream_id: int) -> None:
         self.calls.append("disable_stream")

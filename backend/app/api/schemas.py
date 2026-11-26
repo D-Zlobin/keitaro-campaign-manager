@@ -109,6 +109,18 @@ class CampaignFetchResponse(BaseModel):
     notices: list[str] = Field(default_factory=list)
 
 
+class CampaignUploadResponse(BaseModel):
+    """Result of a conflict-checked upload (spec section 7.2).
+
+    ``campaign.dirty`` is False only when the fetched remote state matches
+    the uploaded values exactly; normalization or divergence keeps the draft
+    dirty and is explained in ``notices``.
+    """
+
+    campaign: CampaignSummary
+    notices: list[str] = Field(default_factory=list)
+
+
 # Campaign detail and draft editing (plan stage 5) -----------------------------
 
 

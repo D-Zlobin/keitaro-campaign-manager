@@ -277,3 +277,20 @@ class CampaignRepository:
         campaign.last_upload_at = when or utcnow()
         session.flush()
         return campaign
+
+    def reset_stale_syncing(self, session: Session) -> int:
+        """Reset campaigns left in ``syncing`` by a crash or restart.
+
+        Deployment is a single backend process, so at startup no upload can
+        be running and a persisted ``syncing`` state is stale. The draft was
+        dirty when the upload started, so it returns to ``dirty``; the next
+        upload's preflight detects any partial remote writes. ``needs_attention``
+        is never reset here — it survives until a recovery fetch.
+        """
+        stale = session.scalars(
+            sa.select(Campaign).where(Campaign.sync_state == SyncState.SYNCING)
+        ).all()
+        for campaign in stale:
+            campaign.sync_state = SyncState.DIRTY
+        session.flush()
+        return len(stale)

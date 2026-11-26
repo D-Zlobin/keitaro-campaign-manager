@@ -6,29 +6,37 @@ Run with:
 Startup validates the environment-backed settings and fails with a clear
 error when required values are missing or invalid. No Keitaro calls are made
 at startup; the Keitaro client is constructed lazily-offline and closed on
-shutdown.
+shutdown. Startup also resets campaigns left in ``syncing`` by a crash —
+single-process deployment guarantees no upload is running then — while
+``needs_attention`` persists until a recovery fetch.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import OperationalError
 
 from app.api import campaigns, catalog, health
 from app.config import Settings, load_settings
-from app.db.engine import build_engine, make_session_factory
+from app.db.engine import build_engine, make_session_factory, session_scope
 from app.errors import register_error_handlers
 from app.five.client import FiveApiClient
 from app.keitaro.adapter import KeitaroAdapter
 from app.keitaro.client import KeitaroClient
 from app.logging_config import configure_logging
+from app.repositories.campaigns import CampaignRepository
 from app.services.campaigns import CampaignService
 from app.services.catalog import CatalogService, FiveApi
 from app.services.drafts import DraftService
 from app.services.locks import UploadLockManager
+from app.services.uploads import UploadService
+
+logger = logging.getLogger(__name__)
 
 API_PREFIX = "/api/v1"
 
@@ -63,6 +71,21 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        try:
+            with session_scope(session_factory) as session:
+                stale_syncing = CampaignRepository().reset_stale_syncing(session)
+        except OperationalError as exc:
+            raise RuntimeError(
+                "The database is not migrated (or not reachable). "
+                "Run `alembic upgrade head` before starting the application."
+            ) from exc
+        if stale_syncing:
+            logger.warning(
+                "reset %d campaign(s) stuck in 'syncing' after a restart; "
+                "their drafts remain dirty and the next upload preflight will "
+                "detect any partial remote writes",
+                stale_syncing,
+            )
         yield
         for client in (keitaro_adapter, five_api):
             close = getattr(client, "close", None)
@@ -80,6 +103,9 @@ def create_app(
         session_factory=session_factory, keitaro=keitaro_adapter, settings=settings
     )
     app.state.draft_service = DraftService(session_factory=session_factory, keitaro=keitaro_adapter)
+    app.state.upload_service = UploadService(
+        session_factory=session_factory, keitaro=keitaro_adapter
+    )
     app.state.catalog_service = CatalogService(session_factory=session_factory, five=five_api)
 
     app.add_middleware(
