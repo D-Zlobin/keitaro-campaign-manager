@@ -15,6 +15,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.domain.errors import (
+    OfferNotFoundError,
+    OfferRuleViolationError,
+    StreamNotFoundError,
+    StreamRuleViolationError,
+    UnsupportedStreamEditError,
+)
 from app.repositories.exceptions import CampaignNotFoundError, StaleRevisionError
 from app.repositories.idempotency import IdempotencyPayloadConflict
 
@@ -76,6 +83,13 @@ class UpstreamTimeoutError(AppError):
     code = "upstream_timeout"
 
 
+class ServiceUnavailableError(AppError):
+    """A required upstream integration is not configured on this backend."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "service_unavailable"
+
+
 def error_body(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, "details": details or {}}}
 
@@ -133,6 +147,43 @@ def register_error_handlers(app: FastAPI) -> None:
                 "idempotency_payload_conflict",
                 "This Idempotency-Key was already used with a different request payload.",
             ),
+        )
+
+    # Domain rule failures from draft commands (spec section 8): unknown draft
+    # resources are 404, campaign-rule violations are 422.
+    @app.exception_handler(StreamNotFoundError)
+    async def stream_not_found_handler(_: Request, exc: StreamNotFoundError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=error_body("stream_not_found", str(exc), {"stream_id": exc.keitaro_id}),
+        )
+
+    @app.exception_handler(OfferNotFoundError)
+    async def offer_not_found_handler(_: Request, exc: OfferNotFoundError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=error_body("offer_not_found", str(exc), {"offer_id": exc.offer_id}),
+        )
+
+    @app.exception_handler(StreamRuleViolationError)
+    async def stream_rule_handler(_: Request, exc: StreamRuleViolationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content=error_body("stream_rule_violation", str(exc)),
+        )
+
+    @app.exception_handler(OfferRuleViolationError)
+    async def offer_rule_handler(_: Request, exc: OfferRuleViolationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content=error_body("offer_rule_violation", str(exc)),
+        )
+
+    @app.exception_handler(UnsupportedStreamEditError)
+    async def unsupported_edit_handler(_: Request, exc: UnsupportedStreamEditError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content=error_body("unsupported_stream_edit", str(exc)),
         )
 
     @app.exception_handler(StarletteHTTPException)

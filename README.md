@@ -44,7 +44,7 @@ Health check: `GET /api/v1/health` → `{"status": "ok"}` (no secrets).
 Errors use the envelope `{"error": {"code", "message", "details"}}`.
 CORS allows only `CORS_ALLOWED_ORIGINS` (default `http://localhost:5173`).
 
-### Application API (stage 4)
+### Application API (stage 5)
 
 - `GET /api/v1/campaigns` — list locally known campaigns (name, Keitaro ID,
   sync state, revision, last fetch/upload times).
@@ -63,9 +63,27 @@ CORS allows only `CORS_ALLOWED_ORIGINS` (default `http://localhost:5173`).
   baseline and draft (pins cleared, revision incremented, normalization
   notices returned). A dirty or `needs_attention` draft requires
   `{"confirm_discard": true}`; without it the fetch is a 409.
+- `GET /api/v1/campaigns/{id}` — editor load state: baseline metadata,
+  editable streams/offers (with pins and `offer_capable`), revision, dirty
+  state, persisted notices, and `upload_blocked`.
+- `PUT /api/v1/campaigns/{id}/draft` — one transactional draft mutation:
+  `{expected_revision, command}`. Commands are `delete_stream`,
+  `restore_stream`, `pin_stream`, `unpin_stream`, `add_offer`, and
+  `remove_offer` (with `stream_id`/`offer_id`); percentages, renames, and
+  new streams are not expressible. The backend recalculates shares,
+  validates campaign rules (422), derives dirty state from the canonical
+  baseline (pin-only changes stay clean), and persists atomically; a stale
+  `expected_revision` is a 409, unknown draft IDs are 404. New offers are
+  re-validated against Keitaro before they persist.
+- `GET /api/v1/geos` — country codes and display names for the New
+  Campaign dialog, proxied from the server-side Five API integration
+  (503 while unconfigured).
+- `GET /api/v1/offers?search=` — offer autocomplete returning resolved
+  Keitaro offer IDs. With `campaign_id` and `stream_id` (both required
+  together) offers already active in that stream are excluded; disabled
+  associations stay selectable for reactivation.
 
-The draft editor endpoints (`GET /campaigns/{id}`, draft mutations, offer
-and Geo selectors) arrive in stage 5; upload arrives in stage 6.
+Upload arrives in stage 6.
 
 ### Database
 

@@ -108,6 +108,9 @@ class Campaign(TimestampMixin, Base):
 
     baseline_canonical: Mapped[dict[str, Any]] = mapped_column(JSON)
     baseline_fingerprint: Mapped[str] = mapped_column(String(SHA256_HEX_LENGTH))
+    # Normalization/deletion notices from the fetch that installed the current
+    # baseline; shown in the editor and replaced with the next baseline.
+    notices: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
 
     idempotency_key: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     idempotency_request_hash: Mapped[str | None] = mapped_column(

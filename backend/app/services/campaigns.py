@@ -183,6 +183,32 @@ def _read_error(exc: KeitaroClientError, *, not_found_message: str) -> AppError:
     return _upstream_error(exc)
 
 
+def validate_offer_available(keitaro: KeitaroAdapter, offer_id: int) -> KeitaroOffer:
+    """Require an existing, non-deleted Keitaro offer (spec sections 6.2, 6.8).
+
+    Shared by campaign creation and by draft offer additions so a resolved
+    autocomplete ID is always re-validated against Keitaro before it becomes
+    part of persisted state.
+    """
+    try:
+        offer = keitaro.get_offer(offer_id)
+    except KeitaroResponseError as exc:
+        if exc.status_code == 404:
+            raise RuleViolationError(
+                f"Offer {offer_id} does not exist in Keitaro.",
+                code="offer_unavailable",
+                details={"offer_id": offer_id},
+            ) from exc
+        raise
+    if offer.is_deleted:
+        raise RuleViolationError(
+            f"Offer {offer_id} is deleted in Keitaro.",
+            code="offer_unavailable",
+            details={"offer_id": offer_id},
+        )
+    return offer
+
+
 class CampaignService:
     def __init__(
         self,
@@ -380,22 +406,9 @@ class CampaignService:
 
     def _validate_offer(self, offer_id: int) -> KeitaroOffer:
         try:
-            offer = self._keitaro.get_offer(offer_id)
-        except KeitaroResponseError as exc:
-            if exc.status_code == 404:
-                raise RuleViolationError(
-                    f"Offer {offer_id} does not exist in Keitaro.",
-                    code="offer_unavailable",
-                    details={"offer_id": offer_id},
-                ) from exc
-            raise
-        if offer.is_deleted:
-            raise RuleViolationError(
-                f"Offer {offer_id} is deleted in Keitaro.",
-                code="offer_unavailable",
-                details={"offer_id": offer_id},
-            )
-        return offer
+            return validate_offer_available(self._keitaro, offer_id)
+        except KeitaroClientError as exc:
+            raise _upstream_error(exc) from exc
 
     def _persist_creation(
         self,
@@ -421,6 +434,7 @@ class CampaignService:
                 baseline_source=BaselineSource.CREATE,
                 idempotency_key=idempotency_key,
                 idempotency_request_hash=request_hash,
+                notices=normalized.notices,
                 revision=0,
                 sync_state=sync_state,
             )
@@ -533,6 +547,7 @@ class CampaignService:
                     baseline_canonical=canonical,
                     baseline_fingerprint=fingerprint,
                     baseline_source=BaselineSource.FETCH,
+                    notices=normalized.notices,
                     revision=0,
                     sync_state=sync_state,
                 )
@@ -633,6 +648,7 @@ class CampaignService:
                 streams=_draft_inputs(normalized),
                 sync_state=sync_state,
             )
+            self._campaigns.set_notices(session, campaign_id, normalized.notices)
             self._campaigns.mark_fetched(session, campaign_id)
             return CampaignFetchResponse(
                 campaign=_campaign_summary(campaign), notices=list(normalized.notices)

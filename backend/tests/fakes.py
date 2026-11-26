@@ -6,6 +6,9 @@ absence of writes, and supports queued per-operation failures to simulate
 every step of the creation sequence. IDs are assigned monotonically and
 timestamps advance on every write so fingerprints change like real remote
 state.
+
+Also hosts ``FakeFiveApiClient``, the in-memory stand-in for the Five API
+catalog integration (Geo list and offer autocomplete).
 """
 
 from __future__ import annotations
@@ -13,6 +16,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.api.schemas import GeoOption, OfferOption
+from app.five.errors import FiveApiError
 from app.keitaro.client import KeitaroResponseError
 from app.keitaro.models import (
     KeitaroCampaign,
@@ -329,3 +334,39 @@ class FakeKeitaroAdapter:
         self.calls.append("enable_stream")
         self._maybe_fail("enable_stream")
         self.touch_stream(stream_id, state="active")
+
+
+class FakeFiveApiClient:
+    """In-memory Five API stand-in for catalog endpoint tests.
+
+    Returns the configured Geo list and offer search results (filtered by a
+    case-insensitive substring match on the name, like the real directory)
+    and can be primed with a failure to simulate upstream outages.
+    """
+
+    def __init__(self) -> None:
+        self.geos: list[GeoOption] = [
+            GeoOption(code="DE", name="Germany"),
+            GeoOption(code="CL", name="Chile"),
+        ]
+        self.offers: list[OfferOption] = [
+            OfferOption(offer_id=DEFAULT_OFFER_ID, name="Example Offer"),
+        ]
+        self.failure: FiveApiError | None = None
+        self.calls: list[str] = []
+
+    def list_geos(self) -> list[GeoOption]:
+        self.calls.append("list_geos")
+        if self.failure is not None:
+            raise self.failure
+        return list(self.geos)
+
+    def search_offers(self, search: str) -> list[OfferOption]:
+        self.calls.append("search_offers")
+        if self.failure is not None:
+            raise self.failure
+        term = search.strip().lower()
+        return [offer for offer in self.offers if term in offer.name.lower()]
+
+    def close(self) -> None:
+        pass

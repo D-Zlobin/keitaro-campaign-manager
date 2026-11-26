@@ -121,6 +121,7 @@ class CampaignRepository:
         baseline_source: BaselineSource = BaselineSource.CREATE,
         idempotency_key: str | None = None,
         idempotency_request_hash: str | None = None,
+        notices: Sequence[str] = (),
         revision: int = 1,
         sync_state: SyncState = SyncState.CLEAN,
     ) -> Campaign:
@@ -140,6 +141,7 @@ class CampaignRepository:
             baseline_fingerprint=baseline_fingerprint,
             idempotency_key=idempotency_key,
             idempotency_request_hash=idempotency_request_hash,
+            notices=list(notices),
             revision=revision,
             sync_state=sync_state,
         )
@@ -256,6 +258,15 @@ class CampaignRepository:
     ) -> Campaign:
         campaign = self.require(session, campaign_id)
         campaign.last_fetch_at = when or utcnow()
+        session.flush()
+        return campaign
+
+    def set_notices(
+        self, session: Session, campaign_id: uuid.UUID, notices: Sequence[str]
+    ) -> Campaign:
+        """Replace the displayed notices; called when a new baseline installs."""
+        campaign = self.require(session, campaign_id)
+        campaign.notices = list(notices)
         session.flush()
         return campaign
 

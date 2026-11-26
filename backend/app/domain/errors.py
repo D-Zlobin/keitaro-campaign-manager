@@ -1,7 +1,7 @@
 """Typed domain errors (plan stage 2).
 
-Services translate these into API error envelopes in later stages:
-``StreamNotFoundError``/``OfferNotFoundError`` map to 404, the rule
+API error handlers (``app.errors``) translate these into the response
+envelope: ``StreamNotFoundError``/``OfferNotFoundError`` map to 404, the rule
 violations map to 422, and local revision conflicts (raised by the
 repositories) map to 409. Domain code never raises HTTP-layer exceptions.
 """

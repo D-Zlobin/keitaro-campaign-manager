@@ -1,10 +1,10 @@
-"""Campaign list, creation, import, and fetch endpoints (plan stage 4).
+"""Campaign list, creation, import, fetch, detail, and draft endpoints.
 
 The service layer is synchronous (sync HTTP client and SQLAlchemy sessions),
-so endpoints run it in the threadpool. Fetch additionally holds the
-per-campaign asyncio lock so it cannot interleave with an upload of the same
-campaign; creation coordinates concurrent duplicates on the idempotency key
-inside the service.
+so endpoints run it in the threadpool. Fetch and draft mutation additionally
+hold the per-campaign asyncio lock so they cannot interleave with an upload
+of the same campaign; creation coordinates concurrent duplicates on the
+idempotency key inside the service.
 """
 
 from __future__ import annotations
@@ -19,13 +19,16 @@ from starlette.concurrency import run_in_threadpool
 from app.api.schemas import (
     CampaignCreatedResponse,
     CampaignCreateRequest,
+    CampaignDetailResponse,
     CampaignFetchRequest,
     CampaignFetchResponse,
     CampaignImportRequest,
     CampaignListResponse,
+    DraftUpdateRequest,
 )
 from app.errors import BadRequestError
 from app.services.campaigns import CampaignService, CreateCampaignCommand
+from app.services.drafts import DraftService
 from app.services.locks import UploadLockManager
 
 router = APIRouter(tags=["campaigns"])
@@ -33,6 +36,10 @@ router = APIRouter(tags=["campaigns"])
 
 def _service(request: Request) -> CampaignService:
     return request.app.state.campaign_service
+
+
+def _draft_service(request: Request) -> DraftService:
+    return request.app.state.draft_service
 
 
 @router.get("/campaigns", response_model=CampaignListResponse)
@@ -76,4 +83,23 @@ async def fetch_campaign(
     async with locks.acquire(campaign_id):
         return await run_in_threadpool(
             _service(request).fetch_campaign, campaign_id, confirm_discard=confirm_discard
+        )
+
+
+@router.get("/campaigns/{campaign_id}", response_model=CampaignDetailResponse)
+async def get_campaign(campaign_id: uuid.UUID, request: Request) -> CampaignDetailResponse:
+    return await run_in_threadpool(_draft_service(request).get_campaign_detail, campaign_id)
+
+
+@router.put("/campaigns/{campaign_id}/draft", response_model=CampaignDetailResponse)
+async def update_campaign_draft(
+    campaign_id: uuid.UUID, payload: DraftUpdateRequest, request: Request
+) -> CampaignDetailResponse:
+    locks: UploadLockManager = request.app.state.upload_locks
+    async with locks.acquire(campaign_id):
+        return await run_in_threadpool(
+            _draft_service(request).apply_draft_command,
+            campaign_id,
+            expected_revision=payload.expected_revision,
+            command=payload.command,
         )

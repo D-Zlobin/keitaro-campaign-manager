@@ -1,19 +1,21 @@
-"""Application API contracts (spec section 8, plan stages 0 and 4).
+"""Application API contracts (spec section 8, plan stages 0, 4, and 5).
 
 These models define the stable request/response shapes for campaign
-creation, listing, import, and fetch, plus the Geo selector and the Five
+creation, listing, import, and fetch, plus the stage-5 editor contracts:
+campaign detail, the draft command payload, the Geo selector, and the Five
 API-backed offer autocomplete. The browser only ever talks to this API;
-upstream credentials stay server-side. The Geo/offer endpoints themselves
-are wired in stage 5.
+upstream credentials stay server-side.
 """
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.domain.states import OfferAssociationState, StreamState
 
 
 class GeoOption(BaseModel):
@@ -105,3 +107,125 @@ class CampaignListResponse(BaseModel):
 class CampaignFetchResponse(BaseModel):
     campaign: CampaignSummary
     notices: list[str] = Field(default_factory=list)
+
+
+# Campaign detail and draft editing (plan stage 5) -----------------------------
+
+
+class DraftOffer(BaseModel):
+    """One offer association of the editable draft."""
+
+    offer_id: int
+    offer_name: str
+    keitaro_association_id: int | None
+    state: OfferAssociationState
+    share: int
+
+
+class DraftStream(BaseModel):
+    """One editable draft stream with its offer associations.
+
+    ``schema`` and ``type`` are exposed so the UI can tell offer-capable
+    streams apart; names and positions are read-only display data.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    keitaro_id: int
+    name: str
+    type: str
+    schema_: str = Field(alias="schema")
+    position: int
+    state: StreamState
+    share: int
+    pinned: bool
+    offer_capable: bool
+    offers: list[DraftOffer]
+
+
+class CampaignDetailResponse(BaseModel):
+    """Editor load state: baseline metadata, draft, pins, revision, dirty
+    state, notices, and whether synchronization currently blocks uploads."""
+
+    campaign: CampaignSummary
+    streams: list[DraftStream]
+    notices: list[str] = Field(default_factory=list)
+    upload_blocked: bool
+
+
+class DeleteStreamCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["delete_stream"]
+    stream_id: int = Field(gt=0)
+
+
+class RestoreStreamCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["restore_stream"]
+    stream_id: int = Field(gt=0)
+
+
+class PinStreamCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["pin_stream"]
+    stream_id: int = Field(gt=0)
+
+
+class UnpinStreamCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["unpin_stream"]
+    stream_id: int = Field(gt=0)
+
+
+class AddOfferCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["add_offer"]
+    stream_id: int = Field(gt=0)
+    offer_id: int = Field(gt=0)
+
+
+class RemoveOfferCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["remove_offer"]
+    stream_id: int = Field(gt=0)
+    offer_id: int = Field(gt=0)
+
+
+# The only editable draft operations (spec sections 6.6-6.8): soft delete and
+# restore, pin and unpin, add and remove/reactivate offer. Stream creation,
+# renames, and manual percentages are deliberately not expressible.
+DraftCommand = Annotated[
+    DeleteStreamCommand
+    | RestoreStreamCommand
+    | PinStreamCommand
+    | UnpinStreamCommand
+    | AddOfferCommand
+    | RemoveOfferCommand,
+    Field(discriminator="type"),
+]
+
+
+class DraftUpdateRequest(BaseModel):
+    """One transactional draft mutation against a known local revision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=0)
+    command: DraftCommand
+
+
+# Catalog endpoints: Geo selector and offer autocomplete (plan stage 5) --------
+
+
+class GeoListResponse(BaseModel):
+    geos: list[GeoOption]
+
+
+class OfferListResponse(BaseModel):
+    offers: list[OfferOption]
