@@ -27,12 +27,13 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt   # pinned; includes runtime deps
 cp .env.example .env                            # dev defaults for the test instance
-# put KEITARO_API_KEY into the repository-root .env (or backend/.env)
+# put KEITARO_API_KEY into backend/.env
 ```
 
-Configuration comes from the environment, then `backend/.env`, then the
-root `.env` (highest precedence). Startup fails with a clear, secret-free
-error when a required value is missing or invalid (`app/config.py`).
+Configuration comes from the environment, then `backend/.env` — the only
+dotenv file, anchored to the backend directory so the launch directory does
+not matter. Startup fails with a clear, secret-free error when a required
+value is missing or invalid (`app/config.py`).
 
 ```bash
 .venv/bin/uvicorn --factory app.main:create_app --reload   # serves :8000

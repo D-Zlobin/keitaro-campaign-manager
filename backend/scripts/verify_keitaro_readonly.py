@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -29,9 +30,13 @@ EXPECTED_ENV_NAMES = [
     "DATABASE_URL",
 ]
 
+# Same single dotenv file the application reads (app.config.ENV_FILE),
+# anchored so the launch directory does not matter.
+ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+
 
 class VerifySettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=(".env", "../.env"), extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
     keitaro_base_url: str = "https://keitaro-for-tests.etolegko.com/admin_api/v1"
     keitaro_api_key: str = ""
@@ -195,7 +200,7 @@ def main() -> int:
 
     from dotenv import dotenv_values
 
-    file_values = {**dotenv_values("../.env"), **dotenv_values(".env")}
+    file_values = dotenv_values(ENV_FILE)
     for name in EXPECTED_ENV_NAMES:
         present = name in os.environ or name in file_values
         print(f"  {name}: {'set' if present else 'MISSING'}")

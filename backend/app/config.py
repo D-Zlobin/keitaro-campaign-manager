@@ -6,6 +6,7 @@ or invalid. No Keitaro calls are made from this module.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlparse
 
@@ -14,17 +15,25 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 KEITARO_API_PATH_SUFFIX = "/admin_api/v1"
 
+# The single dotenv file, anchored to the backend directory so the launch
+# directory cannot change which file is loaded.
+ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+
 
 class ConfigurationError(Exception):
     """Backend configuration is missing or invalid; startup must abort."""
 
 
-def load_settings() -> Settings:
+def load_settings(**overrides: Any) -> Settings:
     """Load settings, failing startup with a message that names the broken
     fields without echoing any configured values (the environment may hold
-    credentials)."""
+    credentials).
+
+    ``overrides`` go to the ``Settings`` constructor; tests use them to stay
+    hermetic (e.g. ``_env_file=os.devnull`` to skip the dotenv file).
+    """
     try:
-        return Settings()
+        return Settings(**overrides)
     except ValidationError as exc:
         problems = "; ".join(
             f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}" for err in exc.errors()
@@ -39,13 +48,12 @@ class Settings(BaseSettings):
     """Backend configuration.
 
     Values are read from process environment variables first, then from
-    ``.env`` files (``backend/.env``, overridden by the repository-root
-    ``.env``). Run the backend from the ``backend/`` directory so the relative
-    paths resolve.
+    ``backend/.env`` — the only dotenv file, resolved absolutely so the
+    launch directory does not matter.
     """
 
     model_config = SettingsConfigDict(
-        env_file=(".env", "../.env"),
+        env_file=ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
     )

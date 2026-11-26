@@ -94,8 +94,10 @@ def test_load_settings_error_names_fields_without_echoing_values(
 
     _clear_required(monkeypatch)
     monkeypatch.setenv("KEITARO_API_KEY", "real-secret-key-value")
+    # Skip the developer's real backend/.env so only the process environment
+    # above feeds the settings.
     with pytest.raises(ConfigurationError) as exc_info:
-        load_settings()
+        load_settings(_env_file=os.devnull)
     message = str(exc_info.value)
     assert "keitaro_base_url" in message
     assert "database_url" in message
