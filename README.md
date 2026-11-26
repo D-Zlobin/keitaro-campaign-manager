@@ -7,7 +7,7 @@ stages). Current status: **stages 0–7 complete** (scaffold and Keitaro
 contract verification; persistence, baselines, and synchronization
 metadata; domain share calculation, canonicalization, and update planning;
 Keitaro adapter with bounded retries, pagination, and fetch normalization,
-plus the Five API Geo/offer adapters; campaign creation with idempotency
+plus the Keitaro-backed Geo/offer catalogs; campaign creation with idempotency
 and compensating cleanup, import, and operator-initiated fetch; the
 revision-safe draft editing API; conflict-checked upload with rollback and
 `needs_attention` recovery; the React campaign workflows and editor).
@@ -20,7 +20,7 @@ revision-safe draft editing API; conflict-checked upload with rollback and
 - `frontend/` — React + TypeScript (Vite) campaign list, creation dialog,
   import, and stream/offer editor. Component tests run against a mocked
   application API; browser end-to-end tests run against the real backend
-  with fake Keitaro/Five upstreams.
+  with a fake Keitaro upstream.
 - `docs/` — specification and plan.
 
 ## Backend
@@ -82,12 +82,14 @@ CORS allows only `CORS_ALLOWED_ORIGINS` (default `http://localhost:5173`).
   `expected_revision` is a 409, unknown draft IDs are 404. New offers are
   re-validated against Keitaro before they persist.
 - `GET /api/v1/geos` — country codes and display names for the New
-  Campaign dialog, proxied from the server-side Five API integration
-  (503 while unconfigured).
-- `GET /api/v1/offers?search=` — offer autocomplete returning resolved
-  Keitaro offer IDs. With `campaign_id` and `stream_id` (both required
-  together) offers already active in that stream are excluded; disabled
-  associations stay selectable for reactivation.
+  Campaign dialog, served from the backend's static ISO 3166-1 list
+  (Keitaro has no country-list endpoint).
+- `GET /api/v1/offers?search=` — offer autocomplete: a case-insensitive
+  name search over Keitaro's offers (`GET /offers`, deleted offers
+  excluded), returning Keitaro offer IDs. With `campaign_id` and
+  `stream_id` (both required together) offers already active in that
+  stream are excluded; disabled associations stay selectable for
+  reactivation.
 
 - `POST /api/v1/campaigns/{id}/upload` — push the persisted dirty draft to
   Keitaro (no request body; the client never supplies a campaign snapshot).
@@ -153,7 +155,7 @@ Structure (`frontend/src/`):
   credentials or raw upstream responses.
 - `pages/CampaignListPage.tsx` — main screen: campaign list (name, Keitaro
   ID, sync state, last synchronization), the compact **New Campaign** dialog
-  (Name, API-loaded Geo select, Five API-backed Offer autocomplete that
+  (Name, API-loaded Geo select, Keitaro-backed Offer autocomplete that
   submits the resolved Keitaro offer ID), and the Open-by-Keitaro-ID import
   form.
 - `pages/CampaignEditorPage.tsx` — editor: primary button (**Get streams
@@ -171,7 +173,7 @@ Structure (`frontend/src/`):
 
 `frontend/e2e/` runs Playwright (Chromium) against the **real backend** —
 FastAPI, SQLite, services, and revision/lock handling — with only Keitaro
-and the Five API replaced by in-memory fakes. The Playwright `webServer`
+and the Keitaro API replaced by an in-memory fake. The Playwright `webServer`
 builds the frontend and starts `backend/scripts/e2e_server.py`, which
 serves the built app and the API on one origin and exposes `/e2e/*` control
 endpoints (state reset, simulated remote drift) that exist only in this
@@ -220,12 +222,3 @@ Open items (not blockers for stages 4–6):
   `action_options`) needs one write test on a disposable campaign, or an
   operator check of the admin UI, before the first live creation. Both
   variants are implemented (`redirect_via` in `payloads.py`).
-- **Five API** (Geo list + offer autocomplete upstream): implemented in
-  `backend/app/five/` against an assumed contract (bearer auth,
-  `GET /geos` → `[{code, name}]`, `GET /offers?search=` →
-  `[{keitaro_offer_id, name}]`; see the package docstring). Auth shape,
-  search parameters, and the Keitaro offer-ID mapping remain unverified
-  pending Five API docs/credentials — adjust `app/five/models.py` when
-  confirmed. Credentials are server-only settings and never reach the
-  browser; adapters retry safe reads only and redact the key from errors
-  and logs.

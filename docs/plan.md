@@ -30,9 +30,9 @@ Keep dependency versions pinned through the selected package managers. Do not ad
 
 The creation entry point is a compact **New Campaign** dialog containing **Name**, **Geo**, and **Offer** fields plus a **Create** action. Domain, group, traffic source, and Google redirect remain backend configuration and are not form fields.
 
-- Populate **Geo** from an API-provided list rather than a hardcoded frontend list. The initial version still submits one ISO 3166-1 alpha-2 country code, normalized to uppercase, as required by the specification.
-- Implement **Offer** as autocomplete backed by the **Five API**. Display loading, no-results, and failure states, and submit the selected offer identity rather than free text.
-- Verify during integration design how Five API results map to Keitaro offer IDs. Creation must still validate that the resolved offer exists and is not deleted in Keitaro before any campaign is created.
+- Populate **Geo** from an API-provided list rather than a hardcoded frontend list. The backend serves a static ISO 3166-1 code/name list (Keitaro has no country-list endpoint); the initial version still submits one ISO 3166-1 alpha-2 country code, normalized to uppercase, as required by the specification.
+- Implement **Offer** as autocomplete backed by the **Keitaro offer list** (`GET /offers` through the backend adapter, deleted offers excluded). Display loading, no-results, and failure states, and submit the selected Keitaro offer ID rather than free text.
+- Creation must still validate that the resolved offer exists and is not deleted in Keitaro before any campaign is created.
 
 ### Application navigation and screen workflow
 
@@ -50,7 +50,7 @@ Main screen: Campaign list
 
 2. **New Campaign dialog**
    - Show **Name**, **Geo**, and **Offer** fields and a **Create** action.
-   - Use the API-provided Geo list and Five API-backed Offer autocomplete.
+   - Use the API-provided Geo list and Keitaro-backed Offer autocomplete.
    - On successful creation, close the dialog and open the new campaign’s editor with its clean baseline and persisted draft.
 
 3. **Edit Campaign screen**
@@ -85,7 +85,7 @@ Enforce these rules in backend domain code and test them independently of HTTP a
 
 - Create backend and frontend applications, development commands, lint/format configuration, and test runners.
 - Add environment-based backend settings for every value listed in specification section 5. Fail startup clearly when required values are missing or invalid; do not make mutating Keitaro calls at startup.
-- Define the API contracts and server-only configuration needed for the Geo list and Five API offer autocomplete. Verify Five API authentication, search parameters, response mapping to Keitaro offer IDs, and Geo codes/display names before implementing the selectors.
+- Define the API contracts for the Geo list and offer autocomplete. The Geo list is a static backend ISO 3166-1 code/name list; offer search goes through the Keitaro adapter, so no additional upstream or credentials are needed.
 - Configure restrictive CORS, structured logging, consistent API error responses, and a health endpoint that exposes no secrets.
 - Against the target Keitaro version’s documentation and, with explicit operator approval, a disposable test instance, verify:
   - Campaign creation and archive payloads.
@@ -160,14 +160,14 @@ Enforce these rules in backend domain code and test them independently of HTTP a
 - Normalize remote campaign, stream, filter/action, timestamp, and association responses into validated internal models. Reject successful responses missing required IDs or fields.
 - Preserve enough raw managed data to construct fingerprints and partial updates while never returning credentials or secret-bearing headers.
 - Add sanitized operation logging with IDs, duration, operation, and status category only.
-- Implement backend adapters for the API-provided Geo list and Five API offer search, including timeouts, response validation, safe-read retries, and sanitized errors. Keep their credentials server-side and translate results into stable application response models.
+- Implement the Geo list (static ISO 3166-1 data served from the backend) and offer search over the Keitaro adapter (`GET /offers` with bounded safe-read retries and sanitized errors), translating results into stable application response models.
 - Implement fetch normalization: include non-deleted active and disabled streams, omit remotely deleted streams with diagnostic notes, clear pins, zero disabled shares, and normalize invalid stream/offer totals with notices and dirty state.
 
 **Tests**
 
 - Mock transport coverage for success, timeout, retry exhaustion, malformed JSON/types, missing IDs, remote rejection, and pagination.
 - Payload contract tests for both created streams, complementary country filters, redirect action, offer association, and partial updates.
-- Geo-list and Five API autocomplete tests covering result mapping, Keitaro offer-ID resolution, empty results, malformed responses, timeouts, and upstream failures.
+- Geo-list and offer autocomplete tests covering result mapping, deleted-offer exclusion, empty results, malformed responses, timeouts, and upstream failures.
 - Tests proving retries occur only for safe reads and never blindly for campaign creation or stream updates.
 
 **Exit criteria**
@@ -205,8 +205,8 @@ Enforce these rules in backend domain code and test them independently of HTTP a
 - Implement transactional `PUT /campaigns/{id}/draft` with `expected_revision` and server-side validation/recalculation.
 - Define a stable draft command/payload shape for delete, restore, pin/unpin, add offer, and remove/reactivate offer. Validate that only supported streams expose offer editing and that names/new streams/manual percentages are not editable.
 - Derive dirty state after recalculation and persist it atomically with the new revision.
-- Implement `GET /offers?search=` through the Five API integration for autocomplete, returning validated display data and resolved Keitaro offer IDs. Exclude offers already actively associated with the stream being edited.
-- Implement `GET /geos` through the Geo-list API integration, returning stable country codes and display names for the New Campaign selector. Do not expose upstream credentials or require the browser to call either upstream API directly.
+- Implement `GET /offers?search=` as a case-insensitive name search over the Keitaro offer list, returning validated display data with Keitaro offer IDs. Exclude offers already actively associated with the stream being edited.
+- Implement `GET /geos` from the backend's static ISO 3166-1 list, returning stable country codes and display names for the New Campaign selector. Do not expose upstream credentials or require the browser to call Keitaro directly.
 - Map stale local revisions and invalid campaign rules to the specified error statuses without partial changes.
 
 **Tests**
@@ -250,7 +250,7 @@ Enforce these rules in backend domain code and test them independently of HTTP a
 - Build the campaign list with name, Keitaro ID, dirty/synchronization state, and last synchronization time.
 - Add a compact **New Campaign** dialog with exactly the **Name**, **Geo**, and **Offer** inputs and a **Create** action; add a separate Open by Keitaro campaign ID form for import.
 - Load Geo choices from `GET /geos` into a single-select field with loading, empty, and error states. Submit one normalized ISO alpha-2 code rather than display text.
-- Implement Offer autocomplete using `GET /offers?search=` and the Five API-backed integration. Show loading, no-results, and request-failure states; require a selected offer and submit its resolved Keitaro offer ID rather than arbitrary text.
+- Implement Offer autocomplete using `GET /offers?search=` and the Keitaro-backed integration. Show loading, no-results, and request-failure states; require a selected offer and submit its Keitaro offer ID rather than arbitrary text.
 - Apply client-side usability validation while retaining backend authority for all fields and upstream-offer validation.
 - Build the editor route and primary synchronization button:
   - Clean: **Get streams from Keitaro**.
@@ -265,7 +265,7 @@ Enforce these rules in backend domain code and test them independently of HTTP a
 
 **Tests**
 
-- Component tests for the New Campaign dialog, API-loaded Geo options, Five API-backed Offer autocomplete states, selected-ID submission, and Create validation.
+- Component tests for the New Campaign dialog, API-loaded Geo options, Keitaro-backed Offer autocomplete states, selected-ID submission, and Create validation.
 - Component tests for primary-button states, disabled rows, zero-share/pin controls, offer selector exclusions, confirmations, and inline errors.
 - API-client tests for idempotency and revision headers/payloads.
 - End-to-end browser tests against the real backend with mocked Keitaro for create/import, edit persistence across reload, dirty fetch conflict, offer editing, upload conflict, and successful upload.

@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { ApiError } from '../api/client'
 import { searchOffers } from '../api/campaigns'
 import type { OfferSearchContext } from '../api/campaigns'
 import type { OfferOption } from '../api/types'
@@ -25,6 +26,9 @@ interface SearchState {
   term: string
   status: 'loading' | 'ready' | 'error'
   results: OfferOption[]
+  /** Server-provided explanation for non-retryable failures (e.g. 503). */
+  errorMessage?: string
+  errorRetryable?: boolean
 }
 
 /**
@@ -82,7 +86,16 @@ export function OfferAutocomplete({
           if (error instanceof DOMException && error.name === 'AbortError') {
             return
           }
-          setSearch({ term, status: 'error', results: [] })
+          // A 503 means the catalog integration is not configured — show the
+          // server's explanation instead of a retry that cannot succeed.
+          const unavailable = error instanceof ApiError && error.status === 503
+          setSearch({
+            term,
+            status: 'error',
+            results: [],
+            errorMessage: unavailable ? error.message : undefined,
+            errorRetryable: !unavailable,
+          })
           setActiveIndex(-1)
         })
     }, SEARCH_DEBOUNCE_MS)
@@ -184,10 +197,12 @@ export function OfferAutocomplete({
           )}
           {status === 'error' && (
             <div className="offer-status offer-status-error" role="alert">
-              Offer search failed.{' '}
-              <button type="button" onClick={() => setRetryToken((token) => token + 1)}>
-                Retry
-              </button>
+              {current?.errorMessage ?? 'Offer search failed.'}{' '}
+              {current?.errorRetryable !== false && (
+                <button type="button" onClick={() => setRetryToken((token) => token + 1)}>
+                  Retry
+                </button>
+              )}
             </div>
           )}
           {status === 'ready' && results.length === 0 && (

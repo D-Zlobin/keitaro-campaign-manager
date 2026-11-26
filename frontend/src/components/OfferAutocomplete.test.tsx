@@ -118,6 +118,27 @@ describe('OfferAutocomplete', () => {
     expect(await screen.findByRole('option', { name: /Alpha Diet Offer/ })).toBeInTheDocument()
   })
 
+  it('shows the server message without Retry when the catalog is not configured (503)', async () => {
+    mockApi([
+      {
+        method: 'GET',
+        path: '/api/v1/offers',
+        handler: () =>
+          errorResponse(
+            503,
+            'service_unavailable',
+            'The offer and Geo catalog integration is not configured on this backend.',
+          ),
+      },
+    ])
+    const user = userEvent.setup()
+    const { input } = setup()
+
+    await user.type(input, 'alpha')
+    expect(await screen.findByText(/catalog integration is not configured/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+  })
+
   it('passes the editing-stream context so active offers are excluded server-side', async () => {
     const mock = mockApi([
       { method: 'GET', path: '/api/v1/offers', handler: () => jsonResponse({ offers: [] }) },

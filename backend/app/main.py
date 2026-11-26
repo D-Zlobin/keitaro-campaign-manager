@@ -25,13 +25,12 @@ from app.api import campaigns, catalog, health
 from app.config import Settings, load_settings
 from app.db.engine import build_engine, make_session_factory, session_scope
 from app.errors import register_error_handlers
-from app.five.client import FiveApiClient
 from app.keitaro.adapter import KeitaroAdapter
 from app.keitaro.client import KeitaroClient
 from app.logging_config import configure_logging
 from app.repositories.campaigns import CampaignRepository
 from app.services.campaigns import CampaignService
-from app.services.catalog import CatalogService, FiveApi
+from app.services.catalog import CatalogService
 from app.services.drafts import DraftService
 from app.services.locks import UploadLockManager
 from app.services.uploads import UploadService
@@ -45,7 +44,6 @@ def create_app(
     settings: Settings | None = None,
     *,
     keitaro: KeitaroAdapter | None = None,
-    five: FiveApi | None = None,
 ) -> FastAPI:
     settings = settings if settings is not None else load_settings()
     configure_logging(settings.log_level, settings.secret_values())
@@ -61,13 +59,6 @@ def create_app(
             timeout_seconds=settings.keitaro_timeout_seconds,
         )
     )
-    five_api: FiveApi | None = five
-    if five_api is None and settings.five_api_base_url and settings.five_api_api_key:
-        five_api = FiveApiClient(
-            base_url=settings.five_api_base_url,
-            api_key=settings.five_api_api_key.get_secret_value(),
-            timeout_seconds=settings.five_api_timeout_seconds,
-        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -87,10 +78,9 @@ def create_app(
                 stale_syncing,
             )
         yield
-        for client in (keitaro_adapter, five_api):
-            close = getattr(client, "close", None)
-            if callable(close):
-                close()
+        close = getattr(keitaro_adapter, "close", None)
+        if callable(close):
+            close()
         engine.dispose()
 
     app = FastAPI(title="Keitaro Campaign Manager", version="0.1.0", lifespan=lifespan)
@@ -106,7 +96,9 @@ def create_app(
     app.state.upload_service = UploadService(
         session_factory=session_factory, keitaro=keitaro_adapter
     )
-    app.state.catalog_service = CatalogService(session_factory=session_factory, five=five_api)
+    app.state.catalog_service = CatalogService(
+        session_factory=session_factory, keitaro=keitaro_adapter
+    )
 
     app.add_middleware(
         CORSMiddleware,

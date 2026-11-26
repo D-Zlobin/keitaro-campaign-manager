@@ -54,7 +54,7 @@ describe('NewCampaignDialog', () => {
     expect(geoSelect).toBeEnabled()
   })
 
-  it('shows a Geo failure state with a working Retry', async () => {
+  it('shows a Geo failure state with a working Retry for transient errors', async () => {
     let calls = 0
     mockApi([
       {
@@ -63,7 +63,7 @@ describe('NewCampaignDialog', () => {
         handler: () => {
           calls += 1
           return calls === 1
-            ? errorResponse(503, 'service_unavailable', 'The Geo list service is not configured.')
+            ? errorResponse(502, 'upstream_error', 'The Geo list service returned an error.')
             : jsonResponse({ geos: GEOS })
         },
       },
@@ -75,6 +75,26 @@ describe('NewCampaignDialog', () => {
     expect(await screen.findByText(/country list could not be loaded/i)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Retry' }))
     expect(await screen.findByRole('option', { name: 'Germany (DE)' })).toBeInTheDocument()
+  })
+
+  it('shows the server message without Retry when the catalog is not configured (503)', async () => {
+    mockApi([
+      {
+        method: 'GET',
+        path: '/api/v1/geos',
+        handler: () =>
+          errorResponse(
+            503,
+            'service_unavailable',
+            'The offer and Geo catalog integration is not configured on this backend.',
+          ),
+      },
+      offerRoute(),
+    ])
+    setup()
+
+    expect(await screen.findByText(/catalog integration is not configured/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
   })
 
   it('shows an empty state when no countries are available', async () => {

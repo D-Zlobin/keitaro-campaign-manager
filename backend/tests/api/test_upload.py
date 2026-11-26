@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.db.models import Campaign, SyncState
 from app.main import create_app
-from tests.fakes import DEFAULT_OFFER_ID, FakeFiveApiClient, FakeKeitaroAdapter
+from tests.fakes import DEFAULT_OFFER_ID, FakeKeitaroAdapter
 
 
 def _create_campaign(client: TestClient) -> str:
@@ -106,14 +106,13 @@ def test_upload_needs_attention_conflict(api_client: TestClient) -> None:
 def test_startup_resets_stale_syncing(
     api_settings,
     fake_keitaro: FakeKeitaroAdapter,
-    fake_five: FakeFiveApiClient,
     api_client: TestClient,
 ) -> None:
     campaign_id = _create_campaign(api_client)
     _set_sync_state(api_client, campaign_id, SyncState.SYNCING)
 
     # A restart (lifespan startup) resets the stale syncing state to dirty.
-    with TestClient(create_app(api_settings, keitaro=fake_keitaro, five=fake_five)) as restarted:
+    with TestClient(create_app(api_settings, keitaro=fake_keitaro)) as restarted:
         response = restarted.get(f"/api/v1/campaigns/{campaign_id}")
 
     assert response.status_code == 200
@@ -121,10 +120,10 @@ def test_startup_resets_stale_syncing(
 
 
 def test_startup_fails_clearly_when_database_not_migrated(
-    tmp_path, fake_keitaro: FakeKeitaroAdapter, fake_five: FakeFiveApiClient
+    tmp_path, fake_keitaro: FakeKeitaroAdapter
 ) -> None:
     settings = Settings(database_url=f"sqlite:///{tmp_path}/unmigrated.db")
 
     with pytest.raises(RuntimeError, match="alembic upgrade head"):
-        with TestClient(create_app(settings, keitaro=fake_keitaro, five=fake_five)):
+        with TestClient(create_app(settings, keitaro=fake_keitaro)):
             pass

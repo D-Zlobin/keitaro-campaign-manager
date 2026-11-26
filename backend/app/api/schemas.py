@@ -2,8 +2,8 @@
 
 These models define the stable request/response shapes for campaign
 creation, listing, import, and fetch, plus the stage-5 editor contracts:
-campaign detail, the draft command payload, the Geo selector, and the Five
-API-backed offer autocomplete. The browser only ever talks to this API;
+campaign detail, the draft command payload, the Geo selector, and the
+Keitaro-backed offer autocomplete. The browser only ever talks to this API;
 upstream credentials stay server-side.
 """
 

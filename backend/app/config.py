@@ -68,13 +68,6 @@ class Settings(BaseSettings):
 
     keitaro_timeout_seconds: float = Field(default=30.0, gt=0)
 
-    # Server-only Five API integration for offer autocomplete. Optional until
-    # the /offers and /geos endpoints are implemented; requests to those
-    # endpoints fail with 503 while unconfigured.
-    five_api_base_url: str | None = None
-    five_api_api_key: SecretStr | None = None
-    five_api_timeout_seconds: float = Field(default=10.0, gt=0)
-
     cors_allowed_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
     log_level: str = "INFO"
 
@@ -110,6 +103,4 @@ class Settings(BaseSettings):
     def secret_values(self) -> list[str]:
         """Values that must never appear in logs or responses."""
         secrets = [self.keitaro_api_key.get_secret_value()]
-        if self.five_api_api_key is not None:
-            secrets.append(self.five_api_api_key.get_secret_value())
         return [secret for secret in secrets if secret]

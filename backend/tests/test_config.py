@@ -40,8 +40,6 @@ def test_missing_required_settings_fail_startup_clearly(monkeypatch: pytest.Monk
 
 def test_defaults(settings: Settings) -> None:
     assert settings.keitaro_timeout_seconds == 30.0
-    assert settings.five_api_base_url is None
-    assert settings.five_api_api_key is None
     assert settings.cors_allowed_origins == ["http://localhost:5173"]
 
 
@@ -83,8 +81,8 @@ def test_cors_origins_parse_comma_separated_string() -> None:
 
 
 def test_secret_values_lists_all_configured_credentials() -> None:
-    settings = Settings(five_api_api_key="five-secret")
-    assert settings.secret_values() == ["test-api-key", "five-secret"]
+    settings = Settings()
+    assert settings.secret_values() == ["test-api-key"]
 
 
 def test_load_settings_error_names_fields_without_echoing_values(

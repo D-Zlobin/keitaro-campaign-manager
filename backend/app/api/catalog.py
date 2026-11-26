@@ -1,9 +1,10 @@
 """Geo selector and offer autocomplete endpoints (plan stage 5).
 
-Both proxy the server-side Five API integration through the catalog service;
-the browser never holds upstream credentials and never calls the upstream
-directly. Offer search optionally takes the stream being edited so offers
-already active there are excluded from the selector.
+The Geo list is served from the backend's static ISO 3166-1 list and offer
+search goes through the Keitaro adapter; the browser never holds upstream
+credentials and never calls Keitaro directly. Offer search optionally takes
+the stream being edited so offers already active there are excluded from
+the selector.
 """
 
 from __future__ import annotations

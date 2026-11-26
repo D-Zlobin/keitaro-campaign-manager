@@ -35,6 +35,7 @@ export function NewCampaignDialog({ onClose, onCreated }: NewCampaignDialogProps
 
   const [geos, setGeos] = useState<GeoOption[]>([])
   const [geoState, setGeoState] = useState<GeoLoadState>('loading')
+  const [geoError, setGeoError] = useState<{ message: string; retryable: boolean } | null>(null)
   const [geoReload, setGeoReload] = useState(0)
 
   const idempotencyKey = useRef<string>(crypto.randomUUID())
@@ -52,6 +53,13 @@ export function NewCampaignDialog({ onClose, onCreated }: NewCampaignDialogProps
         }
         setGeos([])
         setGeoState('error')
+        // A 503 means the catalog integration is not configured — retrying
+        // cannot help, so show the server's explanation without a Retry.
+        setGeoError(
+          error instanceof ApiError && error.status === 503
+            ? { message: error.message, retryable: false }
+            : { message: 'The country list could not be loaded.', retryable: true },
+        )
       })
     return () => controller.abort()
   }, [geoReload])
@@ -147,18 +155,20 @@ export function NewCampaignDialog({ onClose, onCreated }: NewCampaignDialogProps
               </option>
             ))}
           </select>
-          {geoState === 'error' && (
+          {geoState === 'error' && geoError && (
             <p className="field-error" role="alert">
-              The country list could not be loaded.{' '}
-              <button
-                type="button"
-                onClick={() => {
-                  setGeoState('loading')
-                  setGeoReload((token) => token + 1)
-                }}
-              >
-                Retry
-              </button>
+              {geoError.message}{' '}
+              {geoError.retryable && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGeoState('loading')
+                    setGeoReload((token) => token + 1)
+                  }}
+                >
+                  Retry
+                </button>
+              )}
             </p>
           )}
           {fieldErrors.geo && (

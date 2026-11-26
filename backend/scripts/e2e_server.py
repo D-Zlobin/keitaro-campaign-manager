@@ -1,13 +1,14 @@
-"""Disposable end-to-end server: the real application with fake upstreams.
+"""Disposable end-to-end server: the real application with a fake Keitaro.
 
 Used only by the Playwright suite (``frontend/e2e``). It serves the built
-frontend (``frontend/dist``) and the application API on one origin, backed by
-the in-memory Keitaro/Five fakes from ``tests.fakes`` — no real Keitaro
+frontend (``frontend/dist``) and the application API on one origin, backed
+by the in-memory Keitaro fake from ``tests.fakes`` — no real Keitaro
 instance, credentials, or network access is involved.
 
-Extra ``/e2e/*`` control endpoints let the suite reset all state and simulate
-external remote changes (drift) between the fingerprint preflight and upload.
-They exist only in this harness, never in the deployed application.
+Extra ``/e2e/*`` control endpoints let the suite reset all state and
+simulate external remote changes (drift) between the fingerprint preflight
+and upload. They exist only in this harness, never in the deployed
+application.
 
 Run from anywhere:
 
@@ -31,16 +32,14 @@ from fastapi import Request  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 from alembic import command as alembic_command  # noqa: E402
-from app.api.schemas import GeoOption, OfferOption  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.db.engine import session_scope  # noqa: E402
 from app.db.models import Base  # noqa: E402
 from app.keitaro.models import KeitaroOffer  # noqa: E402
 from app.main import create_app  # noqa: E402
-from tests.fakes import FakeFiveApiClient, FakeKeitaroAdapter  # noqa: E402
+from tests.fakes import FakeKeitaroAdapter  # noqa: E402
 
 # Deterministic catalog shared with the Playwright specs.
-E2E_GEOS = [("DE", "Germany"), ("CL", "Chile"), ("BR", "Brazil")]
 E2E_OFFERS = [
     (18001, "Alpha Diet Offer"),
     (18002, "Beta Finance Offer"),
@@ -52,7 +51,7 @@ IMPORT_STREAM_IDS = (9101, 9102, 9103)
 
 
 class E2EKeitaroAdapter(FakeKeitaroAdapter):
-    """Fake Keitaro seeded with the E2E catalog and one importable campaign."""
+    """Fake Keitaro seeded with the E2E offers and one importable campaign."""
 
     def reset(self) -> None:
         self.__init__()
@@ -95,13 +94,6 @@ class E2EKeitaroAdapter(FakeKeitaroAdapter):
         )
 
 
-class E2EFiveApiClient(FakeFiveApiClient):
-    def reset(self) -> None:
-        self.__init__()
-        self.geos = [GeoOption(code=code, name=name) for code, name in E2E_GEOS]
-        self.offers = [OfferOption(offer_id=offer_id, name=name) for offer_id, name in E2E_OFFERS]
-
-
 def build_e2e_app(database_url: str):
     settings = Settings(
         keitaro_base_url="https://keitaro-e2e.invalid/admin_api/v1",
@@ -111,19 +103,14 @@ def build_e2e_app(database_url: str):
         keitaro_traffic_source_id=836,
         google_redirect_url="https://www.google.com/",
         database_url=database_url,
-        five_api_base_url="https://five-e2e.invalid",
-        five_api_api_key="e2e-dummy-five-key",  # noqa: S106 - fake, never leaves the harness
     )
     keitaro = E2EKeitaroAdapter()
     keitaro.reset()
-    five = E2EFiveApiClient()
-    five.reset()
-    app = create_app(settings, keitaro=keitaro, five=five)
+    app = create_app(settings, keitaro=keitaro)
 
     @app.post("/e2e/reset")
     def e2e_reset() -> dict[str, str]:
         keitaro.reset()
-        five.reset()
         with session_scope(app.state.session_factory) as session:
             for table in reversed(Base.metadata.sorted_tables):
                 session.execute(table.delete())

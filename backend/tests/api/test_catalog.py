@@ -1,27 +1,28 @@
 """Catalog endpoints: Geo selector and offer autocomplete (plan stage 5).
 
-The browser talks only to the backend; these tests cover the selector
-contracts, the active-association exclusion for the stream being edited,
-upstream failure mapping, and credential containment.
+The Geo selector is served from the backend's static ISO 3166-1 list; offer
+autocomplete searches the Keitaro adapter's offers. These tests cover the
+selector contracts, the active-association exclusion for the stream being
+edited, and upstream failure mapping.
 """
 
 from __future__ import annotations
 
+import unicodedata
 import uuid
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.schemas import OfferOption
-from app.config import Settings
-from app.five.client import FiveApiClient
-from app.five.errors import FiveApiResponseError, FiveApiTimeoutError
-from app.main import create_app
-from app.upstream_retry import NO_RETRY
-from tests.fakes import DEFAULT_OFFER_ID, FakeFiveApiClient, FakeKeitaroAdapter
+from app.keitaro.client import KeitaroResponseError, KeitaroTimeoutError
+from app.keitaro.models import KeitaroOffer
+from tests.fakes import DEFAULT_OFFER_ID, FakeKeitaroAdapter
 
 CREATE_BODY = {"name": "Example DE", "country_code": "DE", "offer_id": DEFAULT_OFFER_ID}
+
+
+def _sort_key(name: str) -> str:
+    return unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().casefold()
 
 
 def _create_campaign(client: TestClient) -> dict:
@@ -32,71 +33,60 @@ def _create_campaign(client: TestClient) -> dict:
     return response.json()["campaign"]
 
 
+def _add_offer(fake: FakeKeitaroAdapter, offer_id: int, name: str, state: str = "active") -> None:
+    fake.offers[offer_id] = KeitaroOffer(id=offer_id, name=name, state=state)
+
+
 # GET /geos --------------------------------------------------------------------
 
 
-def test_list_geos_returns_selector_options(
-    api_client: TestClient, fake_five: FakeFiveApiClient
-) -> None:
+def test_list_geos_serves_the_static_iso_list(api_client: TestClient) -> None:
     response = api_client.get("/api/v1/geos")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "geos": [
-            {"code": "DE", "name": "Germany"},
-            {"code": "CL", "name": "Chile"},
-        ]
-    }
-    assert fake_five.calls == ["list_geos"]
-
-
-def test_list_geos_empty_result(api_client: TestClient, fake_five: FakeFiveApiClient) -> None:
-    fake_five.geos = []
-
-    response = api_client.get("/api/v1/geos")
-
-    assert response.status_code == 200
-    assert response.json() == {"geos": []}
-
-
-def test_list_geos_upstream_failure_is_502(
-    api_client: TestClient, fake_five: FakeFiveApiClient
-) -> None:
-    fake_five.failure = FiveApiResponseError("list_geos", 500, "boom")
-
-    response = api_client.get("/api/v1/geos")
-
-    assert response.status_code == 502
-    assert response.json()["error"]["code"] == "upstream_error"
-
-
-def test_list_geos_timeout_is_504(api_client: TestClient, fake_five: FakeFiveApiClient) -> None:
-    fake_five.failure = FiveApiTimeoutError("timed out")
-
-    response = api_client.get("/api/v1/geos")
-
-    assert response.status_code == 504
-    assert response.json()["error"]["code"] == "upstream_timeout"
-
-
-def test_list_geos_unconfigured_is_503(
-    api_settings: Settings, fake_keitaro: FakeKeitaroAdapter
-) -> None:
-    client = TestClient(create_app(api_settings, keitaro=fake_keitaro))
-
-    response = client.get("/api/v1/geos")
-
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "service_unavailable"
+    geos = response.json()["geos"]
+    assert len(geos) == 249
+    assert {"code": "DE", "name": "Germany"} in geos
+    assert {"code": "CL", "name": "Chile"} in geos
+    # Alphabetically sorted by display name, accent-insensitive.
+    names = [geo["name"] for geo in geos]
+    assert names == sorted(names, key=_sort_key)
+    assert names[:2] == ["Afghanistan", "Åland Islands"]
 
 
 # GET /offers ------------------------------------------------------------------
 
 
-def test_search_offers_returns_matches(
-    api_client: TestClient, fake_five: FakeFiveApiClient
+def test_search_offers_returns_keitaro_matches(
+    api_client: TestClient, fake_keitaro: FakeKeitaroAdapter
 ) -> None:
-    fake_five.offers.append(OfferOption(offer_id=18002, name="Another Offer"))
+    _add_offer(fake_keitaro, 18002, "Another Offer")
+    _add_offer(fake_keitaro, 18003, "Example Two")
+
+    response = api_client.get("/api/v1/offers", params={"search": "example"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "offers": [
+            {"offer_id": DEFAULT_OFFER_ID, "name": "Example Offer"},
+            {"offer_id": 18003, "name": "Example Two"},
+        ]
+    }
+
+
+def test_search_offers_is_case_insensitive(
+    api_client: TestClient, fake_keitaro: FakeKeitaroAdapter
+) -> None:
+    response = api_client.get("/api/v1/offers", params={"search": "eXaMpLe"})
+
+    assert response.status_code == 200
+    assert response.json() == {"offers": [{"offer_id": DEFAULT_OFFER_ID, "name": "Example Offer"}]}
+
+
+def test_search_offers_excludes_deleted_offers(
+    api_client: TestClient, fake_keitaro: FakeKeitaroAdapter
+) -> None:
+    _add_offer(fake_keitaro, 18002, "Example Deleted", state="deleted")
 
     response = api_client.get("/api/v1/offers", params={"search": "example"})
 
@@ -105,9 +95,9 @@ def test_search_offers_returns_matches(
 
 
 def test_search_offers_excludes_offers_active_in_the_edited_stream(
-    api_client: TestClient, fake_five: FakeFiveApiClient, fake_keitaro: FakeKeitaroAdapter
+    api_client: TestClient, fake_keitaro: FakeKeitaroAdapter
 ) -> None:
-    fake_five.offers.append(OfferOption(offer_id=18002, name="Example Two"))
+    _add_offer(fake_keitaro, 18002, "Example Two")
     campaign = _create_campaign(api_client)  # stream 901 actively holds offer 18001
 
     response = api_client.get(
@@ -124,7 +114,7 @@ def test_search_offers_excludes_offers_active_in_the_edited_stream(
 
 
 def test_search_offers_keeps_disabled_associations_selectable(
-    api_client: TestClient, fake_five: FakeFiveApiClient, fake_keitaro: FakeKeitaroAdapter
+    api_client: TestClient, fake_keitaro: FakeKeitaroAdapter
 ) -> None:
     campaign = _create_campaign(api_client)
     api_client.put(
@@ -203,9 +193,9 @@ def test_search_offers_malformed_campaign_id_is_400(api_client: TestClient) -> N
 
 
 def test_search_offers_upstream_failure_is_502(
-    api_client: TestClient, fake_five: FakeFiveApiClient
+    api_client: TestClient, fake_keitaro: FakeKeitaroAdapter
 ) -> None:
-    fake_five.failure = FiveApiResponseError("search_offers", 503, "boom")
+    fake_keitaro.queue_failure("list_offers", KeitaroResponseError("list_offers", 500, "boom"))
 
     response = api_client.get("/api/v1/offers", params={"search": "x"})
 
@@ -213,47 +203,12 @@ def test_search_offers_upstream_failure_is_502(
     assert response.json()["error"]["code"] == "upstream_error"
 
 
-def test_search_offers_timeout_is_504(api_client: TestClient, fake_five: FakeFiveApiClient) -> None:
-    fake_five.failure = FiveApiTimeoutError("timed out")
+def test_search_offers_timeout_is_504(
+    api_client: TestClient, fake_keitaro: FakeKeitaroAdapter
+) -> None:
+    fake_keitaro.queue_failure("list_offers", KeitaroTimeoutError("timed out"))
 
     response = api_client.get("/api/v1/offers", params={"search": "x"})
 
     assert response.status_code == 504
     assert response.json()["error"]["code"] == "upstream_timeout"
-
-
-def test_search_offers_unconfigured_is_503(
-    api_settings: Settings, fake_keitaro: FakeKeitaroAdapter
-) -> None:
-    client = TestClient(create_app(api_settings, keitaro=fake_keitaro))
-
-    response = client.get("/api/v1/offers", params={"search": "x"})
-
-    assert response.status_code == 503
-
-
-def test_five_api_key_never_reaches_responses(
-    api_settings: Settings, fake_keitaro: FakeKeitaroAdapter
-) -> None:
-    """Even an upstream error body echoing the credential stays server-side."""
-    secret = "five-secret-key"
-
-    def failing_transport(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, text=f"provider error for key {secret}")
-
-    five = FiveApiClient(
-        base_url="https://five.test",
-        api_key=secret,
-        transport=httpx.MockTransport(failing_transport),
-        retry_policy=NO_RETRY,
-    )
-    client = TestClient(create_app(api_settings, keitaro=fake_keitaro, five=five))
-
-    responses = [
-        client.get("/api/v1/offers", params={"search": "x"}),
-        client.get("/api/v1/geos"),
-    ]
-
-    for response in responses:
-        assert response.status_code == 502
-        assert secret not in response.text

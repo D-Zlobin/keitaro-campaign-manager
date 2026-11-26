@@ -1,47 +1,40 @@
-"""Geo list and offer autocomplete through the server-side Five API (stage 5).
+"""Geo list and offer autocomplete catalogs (plan stage 5).
 
-The browser never calls the upstream directory directly: this service holds
-the only path to it, translates its failures into the standard error
-envelope, and applies the editor's exclusion rule — offers already actively
-associated with the stream being edited are not selectable (spec section
-6.8). While the integration is unconfigured the endpoints fail with 503, as
-documented in ``app.config``.
+The Geo selector is served from the backend's static ISO 3166-1 alpha-2
+list (``app.domain.geos``) — Keitaro has no country-list endpoint, and the
+browser still receives an API-provided list rather than a hardcoded
+frontend one.
+
+Offer autocomplete searches Keitaro's own offers through the adapter
+(``GET /offers``), so the IDs the browser submits are Keitaro offer IDs by
+construction; creation and draft additions still re-validate them against
+Keitaro. The service applies the editor's exclusion rule — offers already
+actively associated with the stream being edited are not selectable (spec
+section 6.8) — and translates Keitaro failures into the standard error
+envelope.
 """
 
 from __future__ import annotations
 
+import unicodedata
 import uuid
-from typing import Protocol
 
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.schemas import GeoListResponse, GeoOption, OfferListResponse, OfferOption
 from app.db.engine import session_scope
+from app.domain.geos import COUNTRY_NAMES
 from app.domain.states import OfferAssociationState
-from app.errors import (
-    AppError,
-    BadRequestError,
-    NotFoundError,
-    ServiceUnavailableError,
-    UpstreamError,
-    UpstreamTimeoutError,
-)
-from app.five.errors import FiveApiError, FiveApiTimeoutError
+from app.errors import BadRequestError, NotFoundError
+from app.keitaro.adapter import KeitaroAdapter
+from app.keitaro.client import KeitaroClientError
 from app.repositories.campaigns import CampaignRepository
+from app.services.campaigns import _upstream_error
 
 
-class FiveApi(Protocol):
-    """The catalog operations the application needs from the Five API."""
-
-    def list_geos(self) -> list[GeoOption]: ...
-
-    def search_offers(self, search: str) -> list[OfferOption]: ...
-
-
-def _five_error(exc: FiveApiError, *, service: str) -> AppError:
-    if isinstance(exc, FiveApiTimeoutError):
-        return UpstreamTimeoutError(f"The {service} did not respond in time. Try again.")
-    return UpstreamError(f"The {service} returned an error.")
+def _geo_sort_key(name: str) -> str:
+    """Accent-insensitive alphabetical order for the selector."""
+    return unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().casefold()
 
 
 class CatalogService:
@@ -49,27 +42,18 @@ class CatalogService:
         self,
         *,
         session_factory: sessionmaker[Session],
-        five: FiveApi | None,
+        keitaro: KeitaroAdapter,
         campaigns: CampaignRepository | None = None,
     ) -> None:
         self._session_factory = session_factory
-        self._five = five
+        self._keitaro = keitaro
         self._campaigns = campaigns or CampaignRepository()
-
-    def _require_five(self) -> FiveApi:
-        if self._five is None:
-            raise ServiceUnavailableError(
-                "The offer and Geo catalog integration is not configured on this backend."
-            )
-        return self._five
 
     def list_geos(self) -> GeoListResponse:
         """Stable country codes and display names for the New Campaign dialog."""
-        five = self._require_five()
-        try:
-            return GeoListResponse(geos=five.list_geos())
-        except FiveApiError as exc:
-            raise _five_error(exc, service="Geo list service") from exc
+        options = [GeoOption(code=code, name=name) for code, name in COUNTRY_NAMES.items()]
+        options.sort(key=lambda option: _geo_sort_key(option.name))
+        return GeoListResponse(geos=options)
 
     def search_offers(
         self,
@@ -78,13 +62,12 @@ class CatalogService:
         campaign_id: uuid.UUID | None = None,
         stream_id: int | None = None,
     ) -> OfferListResponse:
-        """Autocomplete existing offers, resolving Keitaro offer IDs.
+        """Autocomplete existing, non-deleted Keitaro offers.
 
         When ``campaign_id`` and ``stream_id`` identify the stream being
         edited, offers already actively associated with it are excluded;
         disabled associations stay selectable so re-adding reactivates them.
         """
-        five = self._require_five()
         term = search.strip()
         if not term:
             raise BadRequestError("The search term must not be empty.")
@@ -114,9 +97,16 @@ class CatalogService:
                     if offer.state is OfferAssociationState.ACTIVE
                 }
         try:
-            offers = five.search_offers(term)
-        except FiveApiError as exc:
-            raise _five_error(exc, service="offer autocomplete service") from exc
+            offers = self._keitaro.list_offers()
+        except KeitaroClientError as exc:
+            raise _upstream_error(exc) from exc
+        needle = term.casefold()
         return OfferListResponse(
-            offers=[offer for offer in offers if offer.offer_id not in excluded]
+            offers=[
+                OfferOption(offer_id=offer.id, name=offer.name)
+                for offer in offers
+                if not offer.is_deleted
+                and offer.id not in excluded
+                and needle in offer.name.casefold()
+            ]
         )
