@@ -3,21 +3,24 @@
 Web application that creates Keitaro campaigns with a predefined two-stream
 structure and edits streams and offer associations of existing campaigns.
 See `docs/spec.md` (source of truth) and `docs/plan.md` (implementation
-stages). Current status: **stages 0–6 complete** (scaffold and Keitaro
+stages). Current status: **stages 0–7 complete** (scaffold and Keitaro
 contract verification; persistence, baselines, and synchronization
 metadata; domain share calculation, canonicalization, and update planning;
 Keitaro adapter with bounded retries, pagination, and fetch normalization,
 plus the Five API Geo/offer adapters; campaign creation with idempotency
 and compensating cleanup, import, and operator-initiated fetch; the
 revision-safe draft editing API; conflict-checked upload with rollback and
-`needs_attention` recovery).
+`needs_attention` recovery; the React campaign workflows and editor).
 
 ## Layout
 
 - `backend/` — FastAPI application (`app/`), tests (`tests/`), read-only
   verification script (`scripts/`). All Keitaro knowledge lives in
   `backend/app/keitaro/`; the browser never talks to Keitaro.
-- `frontend/` — React + TypeScript (Vite). UI workflows arrive in stage 7.
+- `frontend/` — React + TypeScript (Vite) campaign list, creation dialog,
+  import, and stream/offer editor. Component tests run against a mocked
+  application API; browser end-to-end tests run against the real backend
+  with fake Keitaro/Five upstreams.
 - `docs/` — specification and plan.
 
 ## Backend
@@ -135,10 +138,51 @@ Requires Node 20+.
 cd frontend
 npm install
 npm run dev            # serves :5173, proxies /api to :8000
-npm run test           # vitest
+npm run test           # vitest component and API-client tests
+npm run test:e2e       # Playwright browser tests (see below)
 npm run lint           # oxlint
 npm run format:check   # prettier
 npm run build          # production build
+```
+
+Structure (`frontend/src/`):
+
+- `api/` — typed client for the application API. Parses the error envelope
+  into `ApiError` codes (`stale_revision`, `remote_conflict`, ...) and sends
+  the `Idempotency-Key` header on creation; the browser never sees upstream
+  credentials or raw upstream responses.
+- `pages/CampaignListPage.tsx` — main screen: campaign list (name, Keitaro
+  ID, sync state, last synchronization), the compact **New Campaign** dialog
+  (Name, API-loaded Geo select, Five API-backed Offer autocomplete that
+  submits the resolved Keitaro offer ID), and the Open-by-Keitaro-ID import
+  form.
+- `pages/CampaignEditorPage.tsx` — editor: primary button (**Get streams
+  from Keitaro** when clean, **Upload streams to Keitaro** when dirty,
+  disabled with progress while running), streams table with pins,
+  Delete/Restore, zero-share indication and disabled rows, expandable offer
+  lists with exclusion-scoped offer search, normalization notices, and
+  explicit conflict/stale-revision/`needs_attention` recovery. Every draft
+  mutation sends `expected_revision`; server responses are authoritative and
+  synchronization is never implicit.
+- Routing is hash-based (`#/`, `#/campaigns/{id}`), so the production build
+  works from any static file server.
+
+### End-to-end browser tests
+
+`frontend/e2e/` runs Playwright (Chromium) against the **real backend** —
+FastAPI, SQLite, services, and revision/lock handling — with only Keitaro
+and the Five API replaced by in-memory fakes. The Playwright `webServer`
+builds the frontend and starts `backend/scripts/e2e_server.py`, which
+serves the built app and the API on one origin and exposes `/e2e/*` control
+endpoints (state reset, simulated remote drift) that exist only in this
+harness. Covered flows: creation, import (including duplicate rejection),
+edit persistence across reload, dirty-fetch conflict and confirmed discard,
+offer add/remove/reactivation, upload conflict with zero remote writes, and
+successful upload verified against the fake remote.
+
+```bash
+cd frontend
+npm run test:e2e       # builds frontend, starts the harness, runs Chromium
 ```
 
 ## Stage 0 Keitaro contract verification

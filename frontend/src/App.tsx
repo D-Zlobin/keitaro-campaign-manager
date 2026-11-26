@@ -1,8 +1,21 @@
+import { CampaignEditorPage } from './pages/CampaignEditorPage'
+import { CampaignListPage } from './pages/CampaignListPage'
+import { useHashRoute } from './router'
+
 function App() {
+  const route = useHashRoute()
   return (
     <main>
-      <h1>Keitaro Campaign Manager</h1>
-      <p>Campaign list and editor arrive in stage 7 of the implementation plan.</p>
+      <header className="app-header">
+        <h1>
+          <a href="#/">Keitaro Campaign Manager</a>
+        </h1>
+      </header>
+      {route.name === 'editor' ? (
+        <CampaignEditorPage key={route.campaignId} campaignId={route.campaignId} />
+      ) : (
+        <CampaignListPage />
+      )}
     </main>
   )
 }
