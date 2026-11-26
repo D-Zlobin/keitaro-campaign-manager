@@ -1,7 +1,7 @@
 """Draft detail and transactional local editing (plan stage 5).
 
 The editor loads :class:`CampaignDetailResponse` and mutates the draft with
-single commands (delete/restore/pin/unpin stream, add/remove offer). All
+single commands (delete/restore stream, pin/unpin/add/remove offer). All
 share recalculation happens here through the pure domain functions — the
 client never sends percentages, names, or new streams — and every mutation
 is persisted atomically with an ``expected_revision`` guard and a derived
@@ -30,10 +30,10 @@ from app.api.schemas import (
     DraftCommand,
     DraftOffer,
     DraftStream,
-    PinStreamCommand,
+    PinOfferCommand,
     RemoveOfferCommand,
     RestoreStreamCommand,
-    UnpinStreamCommand,
+    UnpinOfferCommand,
 )
 from app.db.engine import session_scope
 from app.db.models import Stream, StreamOffer, SyncState
@@ -45,8 +45,14 @@ from app.domain.entries import (
     offer_sort_key,
 )
 from app.domain.errors import StreamNotFoundError
-from app.domain.offers import add_offer, remove_offer, validate_active_stream_offers
-from app.domain.shares import delete_stream, pin_stream, restore_stream, unpin_stream
+from app.domain.offers import (
+    add_offer,
+    pin_offer,
+    remove_offer,
+    unpin_offer,
+    validate_active_stream_offers,
+)
+from app.domain.shares import delete_stream, restore_stream
 from app.domain.update_plan import is_dirty
 from app.errors import ConflictError, NotFoundError
 from app.keitaro.adapter import KeitaroAdapter
@@ -90,6 +96,7 @@ def _offer_entry(offer: StreamOffer) -> OfferEntry:
         state=offer.state,
         share=offer.share,
         keitaro_association_id=offer.keitaro_association_id,
+        pinned=offer.pinned,
     )
 
 
@@ -105,7 +112,6 @@ def _stream_snapshot(stream: Stream) -> _StreamSnapshot:
             position=stream.position,
             state=stream.state,
             share=stream.share,
-            pinned=stream.pinned,
             offer_capable=stream.schema_ == STREAM_SCHEMA_OFFER_CAPABLE,
         ),
         offers=tuple(_offer_entry(offer) for offer in stream.offers),
@@ -140,7 +146,6 @@ def _stream_response(
         position=position,
         state=entry.state,
         share=entry.share,
-        pinned=entry.pinned,
         offer_capable=entry.offer_capable,
         offers=offers,
     )
@@ -181,7 +186,6 @@ class DraftService:
                         position=stream.position,
                         state=stream.state,
                         share=stream.share,
-                        pinned=stream.pinned,
                         offer_capable=stream.schema_ == STREAM_SCHEMA_OFFER_CAPABLE,
                     ),
                     offers=[
@@ -191,6 +195,7 @@ class DraftService:
                             keitaro_association_id=offer.keitaro_association_id,
                             state=offer.state,
                             share=offer.share,
+                            pinned=offer.pinned,
                         )
                         for offer in stream.offers
                     ],
@@ -296,6 +301,7 @@ class DraftService:
                             keitaro_association_id=offer.keitaro_association_id,
                             state=offer.state,
                             share=offer.share,
+                            pinned=offer.pinned,
                         )
                         for offer in stream_input.offers
                     ],
@@ -321,10 +327,14 @@ class DraftService:
             target = _require_entry(restored, command.stream_id)
             validate_active_stream_offers(target, offers[command.stream_id])
             return restored, offers
-        if isinstance(command, PinStreamCommand):
-            return pin_stream(entries, command.stream_id), offers
-        if isinstance(command, UnpinStreamCommand):
-            return unpin_stream(entries, command.stream_id), offers
+        if isinstance(command, PinOfferCommand):
+            target = _require_entry(entries, command.stream_id)
+            updated = pin_offer(target, offers[command.stream_id], command.offer_id)
+            return entries, {**offers, command.stream_id: updated}
+        if isinstance(command, UnpinOfferCommand):
+            target = _require_entry(entries, command.stream_id)
+            updated = unpin_offer(target, offers[command.stream_id], command.offer_id)
+            return entries, {**offers, command.stream_id: updated}
         if isinstance(command, AddOfferCommand):
             target = _require_entry(entries, command.stream_id)
             updated = add_offer(target, offers[command.stream_id], command.offer_id)
@@ -375,7 +385,6 @@ class DraftService:
                     position=stream.position,
                     state=entry.state,
                     share=entry.share,
-                    pinned=entry.pinned,
                     baseline_payload=stream.baseline_payload,
                     # Deterministic association-then-offer order (spec section
                     # 6.8), matching how the rows sort on the next load: new
@@ -389,6 +398,7 @@ class DraftService:
                             state=offer.state,
                             share=offer.share,
                             keitaro_association_id=offer.keitaro_association_id,
+                            pinned=offer.pinned,
                             baseline_payload=stream.offer_baselines.get(offer.offer_id),
                         )
                         for offer in sorted(offers[entry.keitaro_id], key=offer_sort_key)

@@ -159,7 +159,6 @@ class Stream(TimestampMixin, Base):
         )
     )
     share: Mapped[int] = mapped_column(Integer)
-    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     baseline_payload: Mapped[dict[str, Any]] = mapped_column(JSON)
 
     campaign: Mapped[Campaign] = relationship(back_populates="streams")
@@ -200,6 +199,9 @@ class StreamOffer(TimestampMixin, Base):
         )
     )
     share: Mapped[int] = mapped_column(Integer)
+    # Local-only pin metadata (never sent to Keitaro): a pinned active offer
+    # keeps its share while the remaining active offers split the rest.
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     baseline_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     stream: Mapped[Stream] = relationship(back_populates="offers")

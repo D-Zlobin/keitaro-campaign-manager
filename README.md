@@ -74,9 +74,11 @@ CORS allows only `CORS_ALLOWED_ORIGINS` (default `http://localhost:5173`).
   state, persisted notices, and `upload_blocked`.
 - `PUT /api/v1/campaigns/{id}/draft` — one transactional draft mutation:
   `{expected_revision, command}`. Commands are `delete_stream`,
-  `restore_stream`, `pin_stream`, `unpin_stream`, `add_offer`, and
-  `remove_offer` (with `stream_id`/`offer_id`); percentages, renames, and
-  new streams are not expressible. The backend recalculates shares,
+  `restore_stream`, `add_offer`, `remove_offer`, `pin_offer`, and
+  `unpin_offer` (with `stream_id`/`offer_id`); percentages, renames, and
+  new streams are not expressible. Stream shares always redistribute
+  equally; pins are local offer-level metadata — a pinned offer keeps its
+  share while the remaining active offers split the rest. The backend recalculates shares,
   validates campaign rules (422), derives dirty state from the canonical
   baseline (pin-only changes stay clean), and persists atomically; a stale
   `expected_revision` is a 409, unknown draft IDs are 404. New offers are
@@ -160,10 +162,10 @@ Structure (`frontend/src/`):
   form.
 - `pages/CampaignEditorPage.tsx` — editor: primary button (**Get streams
   from Keitaro** when clean, **Upload streams to Keitaro** when dirty,
-  disabled with progress while running), streams table with pins,
-  Delete/Restore, zero-share indication and disabled rows, expandable offer
-  lists with exclusion-scoped offer search, normalization notices, and
-  explicit conflict/stale-revision/`needs_attention` recovery. Every draft
+  disabled with progress while running), streams table with Delete/Restore,
+  zero-share indication and disabled rows, expandable offer lists with
+  Pin/Unpin controls and exclusion-scoped offer search, normalization
+  notices, and explicit conflict/stale-revision/`needs_attention` recovery. Every draft
   mutation sends `expected_revision`; server responses are authoritative and
   synchronization is never implicit.
 - Routing is hash-based (`#/`, `#/campaigns/{id}`), so the production build

@@ -77,9 +77,12 @@ describe('CampaignEditorPage — primary synchronization button', () => {
     expect(
       within(await streamRow('Google — DE')).getByRole('button', { name: 'Delete' }),
     ).toBeDisabled()
-    expect(
-      within(await streamRow('Google — DE')).getByRole('button', { name: 'Pin' }),
-    ).toBeDisabled()
+    const user = userEvent.setup()
+    await user.click(
+      within(await streamRow('Offer — 18001')).getByRole('button', { name: '1 offer' }),
+    )
+    expect(screen.getByRole('button', { name: 'Pin' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeDisabled()
   })
 })
 
@@ -91,7 +94,6 @@ describe('CampaignEditorPage — streams table', () => {
     await within(row).findByText('Disabled')
     expect(within(row).getByText('0%')).toBeInTheDocument()
     expect(within(row).getByRole('button', { name: 'Restore' })).toBeInTheDocument()
-    expect(within(row).queryByRole('button', { name: 'Pin' })).not.toBeInTheDocument()
     expect(row.className).toContain('stream-row-disabled')
   })
 
@@ -106,9 +108,23 @@ describe('CampaignEditorPage — streams table', () => {
     ).toBeInTheDocument()
   })
 
-  it('sends pin commands with the current revision; pin-only changes stay clean', async () => {
+  it('sends offer pin commands with the current revision; pin-only changes stay clean', async () => {
     const pinned = makeDetail({
-      streams: [makeGoogleStream({ pinned: true }), makeOfferStream()],
+      streams: [
+        makeGoogleStream(),
+        makeOfferStream({
+          offers: [
+            {
+              offer_id: 18001,
+              offer_name: 'Alpha Diet Offer',
+              keitaro_association_id: 7001,
+              state: 'active',
+              share: 100,
+              pinned: true,
+            },
+          ],
+        }),
+      ],
     })
     const mock = renderEditor(makeDetail(), [
       {
@@ -117,7 +133,7 @@ describe('CampaignEditorPage — streams table', () => {
         handler: ({ body }) => {
           expect(body).toEqual({
             expected_revision: 1,
-            command: { type: 'pin_stream', stream_id: 9101 },
+            command: { type: 'pin_offer', stream_id: 9102, offer_id: 18001 },
           })
           return jsonResponse(pinned)
         },
@@ -125,12 +141,13 @@ describe('CampaignEditorPage — streams table', () => {
     ])
     const user = userEvent.setup()
 
-    await user.click(within(await streamRow('Google — DE')).getByRole('button', { name: 'Pin' }))
+    await user.click(
+      within(await streamRow('Offer — 18001')).getByRole('button', { name: '1 offer' }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Pin' }))
 
-    expect(await within(await streamRow('Google — DE')).findByText('Pinned')).toBeInTheDocument()
-    expect(
-      within(await streamRow('Google — DE')).getByRole('button', { name: 'Unpin' }),
-    ).toBeInTheDocument()
+    expect(await screen.findByText('Pinned')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Unpin' })).toBeInTheDocument()
     // Pin metadata alone is not Keitaro-managed: the draft stays clean.
     expect(screen.getByRole('button', { name: 'Get streams from Keitaro' })).toBeInTheDocument()
     expect(mock.mock.calls.some((call) => (call[1] as RequestInit)?.method === 'PUT')).toBe(true)
@@ -219,6 +236,7 @@ describe('CampaignEditorPage — offer editing', () => {
               keitaro_association_id: 7001,
               state: 'active',
               share: 50,
+              pinned: false,
             },
             {
               offer_id: 18002,
@@ -226,6 +244,7 @@ describe('CampaignEditorPage — offer editing', () => {
               keitaro_association_id: null,
               state: 'active',
               share: 50,
+              pinned: false,
             },
           ],
         }),

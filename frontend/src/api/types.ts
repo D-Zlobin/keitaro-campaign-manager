@@ -27,6 +27,7 @@ export interface DraftOffer {
   keitaro_association_id: number | null
   state: OfferAssociationState
   share: number
+  pinned: boolean
 }
 
 export interface DraftStream {
@@ -37,7 +38,6 @@ export interface DraftStream {
   position: number
   state: StreamState
   share: number
-  pinned: boolean
   offer_capable: boolean
   offers: DraftOffer[]
 }
@@ -68,7 +68,7 @@ export interface OfferOption {
 export type DraftCommand =
   | { type: 'delete_stream'; stream_id: number }
   | { type: 'restore_stream'; stream_id: number }
-  | { type: 'pin_stream'; stream_id: number }
-  | { type: 'unpin_stream'; stream_id: number }
+  | { type: 'pin_offer'; stream_id: number; offer_id: number }
+  | { type: 'unpin_offer'; stream_id: number; offer_id: number }
   | { type: 'add_offer'; stream_id: number; offer_id: number }
   | { type: 'remove_offer'; stream_id: number; offer_id: number }

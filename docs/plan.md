@@ -55,7 +55,7 @@ Main screen: Campaign list
 
 3. **Edit Campaign screen**
    - Load the selected campaign’s baseline metadata, editable streams/offers, pins, local revision, dirty state, notices, and synchronization state from the backend.
-   - Display active and disabled streams with shares, zero-share indication, Pin/Unpin, Delete/Restore, and expandable offer lists where supported.
+   - Display active and disabled streams with shares, zero-share indication, and Delete/Restore, plus expandable offer lists with Pin/Unpin controls where supported.
    - Apply all editing and share recalculation through the draft API; persist successful changes immediately and handle stale local revisions explicitly.
    - Show **Get streams from Keitaro** for a clean draft and **Upload streams to Keitaro** for a dirty draft; disable the action and show progress while an operation runs.
    - Provide confirmed **Discard changes and reload**, inline validation errors, and explicit remote-conflict and `needs_attention` recovery states.
@@ -68,7 +68,7 @@ Enforce these rules in backend domain code and test them independently of HTTP a
 1. Active stream shares always total exactly 100 after every successful mutation; disabled streams always have share 0.
 2. Active offer shares total exactly 100 in every offer-based stream with active offers.
 3. Integer remainders are assigned in stable order: stream position then Keitaro stream ID; association ID then offer ID.
-4. Pins are local-only. Disabling clears a pin, restoring starts unpinned, and pin-only changes do not affect dirty state.
+4. Pins are local-only offer metadata. Removing an offer clears its pin, re-adding starts unpinned, and pin-only changes do not affect dirty state.
 5. Dirty state is derived only from canonical Keitaro-managed draft fields compared with the baseline.
 6. Baseline state is stored separately from mutable draft state and is replaced only by an authorized fetch or confirmed synchronization result.
 7. Every draft replacement is transactional and checks `expected_revision`; every successful mutation increments the revision.
@@ -131,9 +131,9 @@ Enforce these rules in backend domain code and test them independently of HTTP a
 **Work**
 
 - Implement deterministic integer distribution as a shared pure function.
-- Implement stream recalculation for delete, restore, pin, and unpin using the exact `A`, `P`, `U`, and `R` rules in specification section 6.7.
-- Reject atomically any mutation that leaves no unpinned active stream while pinned shares total less than 100.
-- Implement offer add, remove, and reactivation with equal active shares and no effect on stream-level shares.
+- Implement stream recalculation for delete and restore (equal split per specification section 6.7) and offer recalculation for add, remove, pin, and unpin using the exact `A`, `P`, `U`, and `R` rules in specification section 6.8.
+- Reject atomically any mutation that leaves no unpinned active offer while pinned shares total less than 100.
+- Implement offer add, remove, and reactivation with pinned-aware active shares and no effect on stream-level shares.
 - Validate that an active offer-based stream has at least one active offer before restore or upload; permit an empty offer list only while that stream is disabled.
 - Implement canonical Keitaro-managed projections, dirty comparison, and SHA-256 remote fingerprints. Sort keys and collections deterministically and include every field required by specification section 7.1.
 - Implement baseline-versus-draft diffing to produce the minimum stream/association partial-update plan.
@@ -203,7 +203,7 @@ Enforce these rules in backend domain code and test them independently of HTTP a
 
 - Implement `GET /campaigns/{id}` returning baseline metadata, editable streams/offers, pins, revision, dirty state, notices, and upload-blocking state.
 - Implement transactional `PUT /campaigns/{id}/draft` with `expected_revision` and server-side validation/recalculation.
-- Define a stable draft command/payload shape for delete, restore, pin/unpin, add offer, and remove/reactivate offer. Validate that only supported streams expose offer editing and that names/new streams/manual percentages are not editable.
+- Define a stable draft command/payload shape for delete, restore, add offer, remove/reactivate offer, and pin/unpin offer. Validate that only supported streams expose offer editing and that names/new streams/manual percentages are not editable.
 - Derive dirty state after recalculation and persist it atomically with the new revision.
 - Implement `GET /offers?search=` as a case-insensitive name search over the Keitaro offer list, returning validated display data with Keitaro offer IDs. Exclude offers already actively associated with the stream being edited.
 - Implement `GET /geos` from the backend's static ISO 3166-1 list, returning stable country codes and display names for the New Campaign selector. Do not expose upstream credentials or require the browser to call Keitaro directly.
@@ -212,7 +212,7 @@ Enforce these rules in backend domain code and test them independently of HTTP a
 **Tests**
 
 - Endpoint tests for every mutation, malformed IDs, stale revisions, unsupported edits, persistence rollback, and immediate reload persistence.
-- Tests proving disabled rows remain, pins clear/restore correctly, offer reactivation does not duplicate, and pin-only changes remain clean.
+- Tests proving disabled rows remain, offer pins persist and clear correctly, offer reactivation does not duplicate, and pin-only changes remain clean.
 - Tests proving an active offer-based stream with no active offers cannot be restored or uploaded.
 
 **Exit criteria**
@@ -229,7 +229,7 @@ Enforce these rules in backend domain code and test them independently of HTTP a
 - Apply only planned partial updates for changed managed fields, including disabled associations and zero weights for disabled streams. Stop at the first failure.
 - Track completed updates and their baseline inverse operations. After partial failure, attempt compensation in reverse dependency order and verify the result with a fresh remote read/fingerprint comparison.
 - If compensation is confirmed, leave the draft dirty and report the failed operation. If compensation fails or cannot be confirmed, persist `needs_attention`, block further uploads/draft work as required, and require a fresh operator-controlled recovery fetch.
-- After successful writes, fetch the resulting state, replace baseline and draft transactionally, retain pins only for compatible surviving active streams, and recalculate if normalization is necessary. Report clean only when the fetched managed state matches the intended values and requires no normalization.
+- After successful writes, fetch the resulting state, replace baseline and draft transactionally, retain offer pins only for compatible surviving active associations, and recalculate if normalization is necessary. Report clean only when the fetched managed state matches the intended values and requires no normalization.
 
 **Tests**
 
@@ -256,8 +256,8 @@ Enforce these rules in backend domain code and test them independently of HTTP a
   - Clean: **Get streams from Keitaro**.
   - Dirty: **Upload streams to Keitaro**.
   - In progress: disabled with a loading indicator.
-- Render streams sorted by position then ID, including visually distinct disabled rows, read-only names, integer shares, zero-share indication, pin controls, and Delete/Restore actions.
-- Add expandable offer lists only for offer-based streams, with searchable existing-offer selection and no global offer editing.
+- Render streams sorted by position then ID, including visually distinct disabled rows, read-only names, integer shares, zero-share indication, and Delete/Restore actions.
+- Add expandable offer lists only for offer-based streams, with pin controls, searchable existing-offer selection, and no global offer editing.
 - Send draft mutations with the latest revision and use returned state as authoritative. Optimistic updates are optional; if used, roll them back on failure.
 - Show field/stream/offer validation errors, operation failures, normalization notices, and remote conflicts without exposing raw external responses.
 - Require confirmation for **Discard changes and reload** and for recovery that intentionally replaces local edits. Disable upload when validation or `needs_attention` blocks it.

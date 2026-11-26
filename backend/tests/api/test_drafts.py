@@ -21,6 +21,7 @@ from tests.fakes import DEFAULT_OFFER_ID, FakeKeitaroAdapter
 
 CREATE_BODY = {"name": "Example DE", "country_code": "DE", "offer_id": DEFAULT_OFFER_ID}
 SECOND_OFFER_ID = 18002
+THIRD_OFFER_ID = 18004
 
 
 def _create_campaign(client: TestClient) -> dict:
@@ -72,6 +73,12 @@ def _seed_second_offer(fake: FakeKeitaroAdapter) -> None:
     )
 
 
+def _seed_third_offer(fake: FakeKeitaroAdapter) -> None:
+    fake.offers[THIRD_OFFER_ID] = KeitaroOffer(
+        id=THIRD_OFFER_ID, name="Third Offer", state="active"
+    )
+
+
 # GET /campaigns/{id} ----------------------------------------------------------
 
 
@@ -96,7 +103,6 @@ def test_get_detail_returns_full_draft_state(
     assert google["position"] == 0
     assert google["state"] == "active"
     assert google["share"] == 50
-    assert google["pinned"] is False
     assert google["offer_capable"] is False
     assert google["offers"] == []
 
@@ -110,6 +116,7 @@ def test_get_detail_returns_full_draft_state(
             "keitaro_association_id": 7001,
             "state": "active",
             "share": 100,
+            "pinned": False,
         }
     ]
 
@@ -162,33 +169,51 @@ def test_delete_stream_recalculates_and_marks_dirty(
     assert body["campaign"]["revision"] == 2
     assert body["campaign"]["dirty"] is True
     assert body["campaign"]["sync_state"] == "dirty"
-    # Disabled row remains visible with share 0 and no pin; the rest split 100.
+    # Disabled row remains visible with share 0; the rest split 100.
     deleted = _stream(body, 901)
     assert deleted["state"] == "disabled"
     assert deleted["share"] == 0
-    assert deleted["pinned"] is False
     assert _stream(body, 900)["share"] == 50
     assert _stream(body, 902)["share"] == 50
 
 
-def test_delete_last_unpinned_stream_below_pinned_100_rejected(
+def test_remove_last_unpinned_offer_below_pinned_100_rejected(
     api_client: TestClient, fake_keitaro: FakeKeitaroAdapter
 ) -> None:
+    _seed_second_offer(fake_keitaro)
     campaign = _import_campaign(api_client, fake_keitaro)
-    pinned = _put(api_client, campaign["id"], 1, {"type": "pin_stream", "stream_id": 900})
+    added = _put(
+        api_client,
+        campaign["id"],
+        1,
+        {"type": "add_offer", "stream_id": 900, "offer_id": SECOND_OFFER_ID},
+    )
+    assert added.status_code == 200
+    pinned = _put(
+        api_client,
+        campaign["id"],
+        2,
+        {"type": "pin_offer", "stream_id": 900, "offer_id": DEFAULT_OFFER_ID},
+    )
     assert pinned.status_code == 200
-    deleted = _put(api_client, campaign["id"], 2, {"type": "delete_stream", "stream_id": 901})
-    assert deleted.status_code == 200
-    assert _stream(deleted.json(), 902)["share"] == 66
 
-    rejected = _put(api_client, campaign["id"], 3, {"type": "delete_stream", "stream_id": 902})
+    rejected = _put(
+        api_client,
+        campaign["id"],
+        3,
+        {"type": "remove_offer", "stream_id": 900, "offer_id": SECOND_OFFER_ID},
+    )
 
     assert rejected.status_code == 422
-    assert rejected.json()["error"]["code"] == "stream_rule_violation"
+    assert rejected.json()["error"]["code"] == "offer_rule_violation"
     # The rejected mutation changed nothing.
     detail = _detail(api_client, campaign["id"])
     assert detail["campaign"]["revision"] == 3
-    assert _stream(detail, 902)["state"] == "active"
+    offers = _stream(detail, 900)["offers"]
+    assert [(o["offer_id"], o["state"], o["share"], o["pinned"]) for o in offers] == [
+        (SECOND_OFFER_ID, "active", 50, False),
+        (DEFAULT_OFFER_ID, "active", 50, True),
+    ]
 
 
 def test_restore_stream_recalculates_and_can_return_to_clean(
@@ -204,74 +229,174 @@ def test_restore_stream_recalculates_and_can_return_to_clean(
     body = restored.json()
     stream = _stream(body, 902)
     assert stream["state"] == "active"
-    assert stream["pinned"] is False
     # Recalculated shares match the baseline again, so the draft is clean.
     assert [(_stream(body, i)["share"]) for i in (900, 901, 902)] == [34, 33, 33]
     assert body["campaign"]["dirty"] is False
     assert body["campaign"]["sync_state"] == "clean"
 
 
-def test_pin_stream_keeps_current_share_and_stays_clean(
+def test_pin_offer_keeps_current_share_and_stays_clean(
     api_client: TestClient, fake_keitaro: FakeKeitaroAdapter
 ) -> None:
     campaign = _import_campaign(api_client, fake_keitaro)
 
-    response = _put(api_client, campaign["id"], 1, {"type": "pin_stream", "stream_id": 900})
+    response = _put(
+        api_client,
+        campaign["id"],
+        1,
+        {"type": "pin_offer", "stream_id": 900, "offer_id": DEFAULT_OFFER_ID},
+    )
 
     assert response.status_code == 200
     body = response.json()
-    assert _stream(body, 900)["pinned"] is True
-    assert [(_stream(body, i)["share"]) for i in (900, 901, 902)] == [34, 33, 33]
+    (offer,) = _stream(body, 900)["offers"]
+    assert offer["pinned"] is True
+    assert offer["share"] == 100
     # Pin-only metadata never makes the draft dirty.
     assert body["campaign"]["dirty"] is False
     assert body["campaign"]["sync_state"] == "clean"
     assert body["campaign"]["revision"] == 2
 
 
-def test_unpin_stream_redistributes_remainder(
+def test_pin_offer_redistributes_remainder_among_unpinned(
     api_client: TestClient, fake_keitaro: FakeKeitaroAdapter
 ) -> None:
+    _seed_second_offer(fake_keitaro)
+    _seed_third_offer(fake_keitaro)
     campaign = _import_campaign(api_client, fake_keitaro)
-    _put(api_client, campaign["id"], 1, {"type": "pin_stream", "stream_id": 900})
-    _put(api_client, campaign["id"], 2, {"type": "delete_stream", "stream_id": 901})
+    _put(
+        api_client,
+        campaign["id"],
+        1,
+        {"type": "add_offer", "stream_id": 900, "offer_id": SECOND_OFFER_ID},
+    )
+    _put(
+        api_client,
+        campaign["id"],
+        2,
+        {"type": "pin_offer", "stream_id": 900, "offer_id": DEFAULT_OFFER_ID},
+    )
 
-    response = _put(api_client, campaign["id"], 3, {"type": "unpin_stream", "stream_id": 900})
+    response = _put(
+        api_client,
+        campaign["id"],
+        3,
+        {"type": "add_offer", "stream_id": 900, "offer_id": THIRD_OFFER_ID},
+    )
 
     assert response.status_code == 200
-    body = response.json()
-    assert _stream(body, 900)["pinned"] is False
-    assert _stream(body, 900)["share"] == 50
-    assert _stream(body, 902)["share"] == 50
+    offers = _stream(response.json(), 900)["offers"]
+    # The pinned offer keeps 50; the two unpinned split the remainder.
+    assert [(o["offer_id"], o["share"], o["pinned"]) for o in offers] == [
+        (SECOND_OFFER_ID, 25, False),
+        (THIRD_OFFER_ID, 25, False),
+        (DEFAULT_OFFER_ID, 50, True),
+    ]
+
+
+def test_unpin_offer_redistributes_remainder(
+    api_client: TestClient, fake_keitaro: FakeKeitaroAdapter
+) -> None:
+    _seed_second_offer(fake_keitaro)
+    _seed_third_offer(fake_keitaro)
+    campaign = _import_campaign(api_client, fake_keitaro)
+    _put(
+        api_client,
+        campaign["id"],
+        1,
+        {"type": "add_offer", "stream_id": 900, "offer_id": SECOND_OFFER_ID},
+    )
+    _put(
+        api_client,
+        campaign["id"],
+        2,
+        {"type": "add_offer", "stream_id": 900, "offer_id": THIRD_OFFER_ID},
+    )
+    _put(
+        api_client,
+        campaign["id"],
+        3,
+        {"type": "pin_offer", "stream_id": 900, "offer_id": DEFAULT_OFFER_ID},
+    )
+
+    response = _put(
+        api_client,
+        campaign["id"],
+        4,
+        {"type": "unpin_offer", "stream_id": 900, "offer_id": DEFAULT_OFFER_ID},
+    )
+
+    assert response.status_code == 200
+    offers = _stream(response.json(), 900)["offers"]
+    assert [(o["offer_id"], o["share"], o["pinned"]) for o in offers] == [
+        (SECOND_OFFER_ID, 34, False),
+        (THIRD_OFFER_ID, 33, False),
+        (DEFAULT_OFFER_ID, 33, False),
+    ]
 
 
 @pytest.mark.parametrize(
-    "command,disable_first",
+    "setup_commands,command,error_code",
     [
-        ({"type": "pin_stream", "stream_id": 901}, True),  # pin a disabled stream
-        ({"type": "delete_stream", "stream_id": 901}, True),  # delete a disabled stream
-        ({"type": "unpin_stream", "stream_id": 900}, False),  # unpin an unpinned stream
-        ({"type": "restore_stream", "stream_id": 900}, False),  # restore an active stream
+        (
+            [{"type": "delete_stream", "stream_id": 901}],
+            {"type": "delete_stream", "stream_id": 901},  # delete a disabled stream
+            "stream_rule_violation",
+        ),
+        (
+            [],
+            {"type": "restore_stream", "stream_id": 900},  # restore an active stream
+            "stream_rule_violation",
+        ),
+        (
+            [
+                {"type": "delete_stream", "stream_id": 901},
+                {"type": "remove_offer", "stream_id": 901, "offer_id": DEFAULT_OFFER_ID + 1},
+            ],
+            {"type": "restore_stream", "stream_id": 901},  # restore needs an active offer
+            "offer_rule_violation",
+        ),
+        (
+            [
+                {"type": "delete_stream", "stream_id": 901},
+                {"type": "remove_offer", "stream_id": 901, "offer_id": DEFAULT_OFFER_ID + 1},
+            ],
+            {  # pin a removed offer
+                "type": "pin_offer",
+                "stream_id": 901,
+                "offer_id": DEFAULT_OFFER_ID + 1,
+            },
+            "offer_rule_violation",
+        ),
+        (
+            [],
+            {  # unpin an unpinned offer
+                "type": "unpin_offer",
+                "stream_id": 900,
+                "offer_id": DEFAULT_OFFER_ID,
+            },
+            "offer_rule_violation",
+        ),
     ],
 )
 def test_invalid_state_transitions_are_422(
     api_client: TestClient,
     fake_keitaro: FakeKeitaroAdapter,
+    setup_commands: list[dict],
     command: dict,
-    disable_first: bool,
+    error_code: str,
 ) -> None:
     campaign = _import_campaign(api_client, fake_keitaro)
     revision = 1
-    if disable_first:
-        setup = _put(
-            api_client, campaign["id"], revision, {"type": "delete_stream", "stream_id": 901}
-        )
+    for setup_command in setup_commands:
+        setup = _put(api_client, campaign["id"], revision, setup_command)
         assert setup.status_code == 200
         revision += 1
 
     response = _put(api_client, campaign["id"], revision, command)
 
     assert response.status_code == 422
-    assert response.json()["error"]["code"] == "stream_rule_violation"
+    assert response.json()["error"]["code"] == error_code
 
 
 def test_stream_command_unknown_stream_is_404(
@@ -536,16 +661,21 @@ def test_mutations_persist_across_reload(
     api_client: TestClient, fake_keitaro: FakeKeitaroAdapter
 ) -> None:
     campaign = _import_campaign(api_client, fake_keitaro)
-    _put(api_client, campaign["id"], 1, {"type": "pin_stream", "stream_id": 900})
+    _put(
+        api_client,
+        campaign["id"],
+        1,
+        {"type": "pin_offer", "stream_id": 900, "offer_id": DEFAULT_OFFER_ID},
+    )
     _put(api_client, campaign["id"], 2, {"type": "delete_stream", "stream_id": 901})
 
     detail = _detail(api_client, campaign["id"])
 
     assert detail["campaign"]["revision"] == 3
-    assert _stream(detail, 900)["pinned"] is True
+    assert _stream(detail, 900)["offers"][0]["pinned"] is True
     assert _stream(detail, 901)["state"] == "disabled"
     assert _stream(detail, 901)["share"] == 0
-    assert _stream(detail, 902)["share"] == 66
+    assert _stream(detail, 902)["share"] == 50
 
 
 @pytest.mark.parametrize(

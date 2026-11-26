@@ -109,6 +109,50 @@ test('upload conflicts when the remote changed, writes nothing, and keeps the dr
   expect(Number(byId.get(9102)?.weight)).toBe(50)
 })
 
+test('pinned offers keep their share while the rest redistribute', async ({ page }) => {
+  await importCampaignThroughUi(page)
+  const offerRow = streamRow(page, 'Offer — 18001')
+  await offerRow.getByRole('button', { name: '1 offer' }).click()
+  const panel = page.locator('.offers-panel')
+  const search = page.getByRole('combobox', { name: /Search offers to add/ })
+  const alpha = panel.locator('.offer-list-item', { hasText: 'Alpha Diet Offer' })
+
+  // Pin-only change on the clean import: badge appears, draft stays clean.
+  await alpha.getByRole('button', { name: 'Pin' }).click()
+  await expect(panel.getByText('Pinned')).toBeVisible()
+  await expect(page.getByText('Clean')).toBeVisible()
+  await alpha.getByRole('button', { name: 'Unpin' }).click()
+  await expect(panel.getByText('Pinned')).toHaveCount(0)
+
+  // Two offers at 50/50, then pin Alpha.
+  await search.fill('gamma')
+  await page.getByRole('option', { name: /Gamma Sweep Offer/ }).click()
+  await page.getByRole('button', { name: 'Add offer' }).click()
+  await expect(panel.getByText('50%')).toHaveCount(2)
+  await alpha.getByRole('button', { name: 'Pin' }).click()
+  await expect(panel.getByText('Pinned')).toBeVisible()
+
+  // Adding a third offer: the pinned offer keeps 50, the rest split 25/25.
+  await search.fill('delta')
+  await page.getByRole('option', { name: /Delta Nutra Offer/ }).click()
+  await page.getByRole('button', { name: 'Add offer' }).click()
+  await expect(alpha).toContainText('50%')
+  await expect(alpha).toContainText('Pinned')
+  await expect(panel.locator('.offer-list-item', { hasText: 'Gamma Sweep Offer' })).toContainText(
+    '25%',
+  )
+  await expect(panel.locator('.offer-list-item', { hasText: 'Delta Nutra Offer' })).toContainText(
+    '25%',
+  )
+  await expect(page.getByText('Dirty')).toBeVisible()
+
+  // Unpinning redistributes equally again: 34/33/33.
+  await alpha.getByRole('button', { name: 'Unpin' }).click()
+  await expect(panel.getByText('Pinned')).toHaveCount(0)
+  await expect(panel.getByText('34%')).toHaveCount(1)
+  await expect(panel.getByText('33%')).toHaveCount(2)
+})
+
 test('offers can be added and removed with equal shares per stream', async ({ page }) => {
   await importCampaignThroughUi(page)
   const offerRow = streamRow(page, 'Offer — 18001')

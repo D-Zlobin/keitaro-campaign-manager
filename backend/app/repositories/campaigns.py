@@ -50,6 +50,7 @@ class DraftOfferInput:
     state: OfferAssociationState
     share: int
     keitaro_association_id: int | None = None
+    pinned: bool = False
     baseline_payload: dict[str, Any] | None = None
 
 
@@ -64,7 +65,6 @@ class DraftStreamInput:
     position: int
     state: StreamState
     share: int
-    pinned: bool = False
     baseline_payload: dict[str, Any] = field(default_factory=dict)
     offers: tuple[DraftOfferInput, ...] = ()
 
@@ -190,7 +190,6 @@ class CampaignRepository:
                 position=stream_input.position,
                 state=stream_input.state,
                 share=stream_input.share,
-                pinned=stream_input.pinned,
                 baseline_payload=stream_input.baseline_payload,
             )
             session.add(stream)
@@ -204,6 +203,7 @@ class CampaignRepository:
                         offer_name=offer_input.offer_name,
                         state=offer_input.state,
                         share=offer_input.share,
+                        pinned=offer_input.pinned,
                         baseline_payload=offer_input.baseline_payload,
                     )
                 )

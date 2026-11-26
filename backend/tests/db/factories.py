@@ -24,6 +24,7 @@ def draft_offer(
     state: OfferAssociationState = OfferAssociationState.ACTIVE,
     share: int = 100,
     keitaro_association_id: int | None = None,
+    pinned: bool = False,
     baseline_payload: dict[str, Any] | None = None,
 ) -> DraftOfferInput:
     return DraftOfferInput(
@@ -32,6 +33,7 @@ def draft_offer(
         state=state,
         share=share,
         keitaro_association_id=keitaro_association_id,
+        pinned=pinned,
         baseline_payload=baseline_payload,
     )
 
@@ -45,7 +47,6 @@ def draft_stream(
     position: int = 0,
     state: StreamState = StreamState.ACTIVE,
     share: int = 50,
-    pinned: bool = False,
     baseline_payload: dict[str, Any] | None = None,
     offers: tuple[DraftOfferInput, ...] = (),
 ) -> DraftStreamInput:
@@ -57,7 +58,6 @@ def draft_stream(
         position=position,
         state=state,
         share=share,
-        pinned=pinned,
         baseline_payload=baseline_payload if baseline_payload is not None else {"id": keitaro_id},
         offers=offers,
     )

@@ -58,10 +58,7 @@ def test_clean_fetch_replaces_baseline_and_draft(
     assert result.campaign.revision == 2
     assert result.campaign.last_fetch_at is not None
     assert result.notices == []
-    assert [(s.share, s.pinned) for s in _streams(session_factory, campaign_id)] == [
-        (70, False),
-        (30, False),
-    ]
+    assert [s.share for s in _streams(session_factory, campaign_id)] == [70, 30]
     with session_factory() as session:
         campaign = session.get(Campaign, campaign_id)
         assert campaign.baseline_fingerprint != fingerprint_before
@@ -69,18 +66,19 @@ def test_clean_fetch_replaces_baseline_and_draft(
         assert baseline_weights == [70, 30]
 
 
-def test_fetch_clears_pins(
+def test_fetch_clears_offer_pins(
     service: CampaignService, fake_keitaro: FakeKeitaroAdapter, session_factory
 ) -> None:
     campaign_id = _create(service)
     with session_factory() as session:
-        stream = session.scalars(select(Stream)).first()
-        stream.pinned = True
+        offer = session.scalars(select(StreamOffer)).first()
+        offer.pinned = True
         session.commit()
 
     service.fetch_campaign(campaign_id, confirm_discard=False)
 
-    assert [s.pinned for s in _streams(session_factory, campaign_id)] == [False, False]
+    with session_factory() as session:
+        assert [o.pinned for o in session.scalars(select(StreamOffer))] == [False]
 
 
 def test_dirty_fetch_without_confirmation_is_rejected(
@@ -154,7 +152,6 @@ def _draft_with_share(session, campaign_id: uuid.UUID, *, share: int):
                 position=s.position,
                 state=s.state,
                 share=share if position == 0 else 100 - share,
-                pinned=False,
                 baseline_payload=s.baseline_payload,
                 offers=tuple(
                     DraftOfferInput(

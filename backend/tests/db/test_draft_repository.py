@@ -1,4 +1,4 @@
-"""Draft replacement: atomicity, revisions, rollback, pins, reactivation."""
+"""Draft replacement: atomicity, revisions, rollback, offer pins, reactivation."""
 
 from __future__ import annotations
 
@@ -34,17 +34,22 @@ def _seed_campaign(campaigns, session_factory, *, keitaro_id: int = 500):
             campaign_id=campaign.id,
             expected_revision=1,
             streams=[
-                draft_stream(1001, position=0, share=60, pinned=True),
+                draft_stream(
+                    1001,
+                    position=0,
+                    share=60,
+                    offers=(draft_offer(2001, share=100, pinned=True),),
+                ),
                 draft_stream(1002, position=1, share=40),
             ],
         )
         return campaign.id
 
 
-def _draft_rows(session_factory, campaign_id) -> dict[int, tuple[int, bool, str]]:
+def _draft_rows(session_factory, campaign_id) -> dict[int, tuple[int, str]]:
     with session_scope(session_factory) as session:
         streams = session.scalars(sa.select(Stream).where(Stream.campaign_id == campaign_id)).all()
-        return {s.keitaro_id: (s.share, s.pinned, s.state.value) for s in streams}
+        return {s.keitaro_id: (s.share, s.state.value) for s in streams}
 
 
 def test_replace_draft_swaps_rows_and_increments_revision(campaigns, session_factory) -> None:
@@ -132,7 +137,9 @@ def test_failed_draft_replacement_rolls_back_baseline_and_draft(campaigns, sessi
         assert _draft_rows(session_factory, campaign_id) == before
 
 
-def test_replace_draft_keeps_pins_and_zeroes_when_supplied(campaigns, session_factory) -> None:
+def test_replace_draft_keeps_offer_pins_and_zeroes_when_supplied(
+    campaigns, session_factory
+) -> None:
     campaign_id = _seed_campaign(campaigns, session_factory)
 
     with session_scope(session_factory) as session:
@@ -141,15 +148,30 @@ def test_replace_draft_keeps_pins_and_zeroes_when_supplied(campaigns, session_fa
             campaign_id=campaign_id,
             expected_revision=2,
             streams=[
-                draft_stream(1001, position=0, share=70, pinned=True),
+                draft_stream(
+                    1001,
+                    position=0,
+                    share=70,
+                    offers=(
+                        draft_offer(2001, share=60, pinned=True),
+                        draft_offer(2002, share=40),
+                    ),
+                ),
                 draft_stream(1002, position=1, share=0, state=StreamState.DISABLED),
             ],
         )
 
     assert _draft_rows(session_factory, campaign_id) == {
-        1001: (70, True, "active"),
-        1002: (0, False, "disabled"),
+        1001: (70, "active"),
+        1002: (0, "disabled"),
     }
+    with session_scope(session_factory) as session:
+        campaign = campaigns.get_with_draft(session, campaign_id)
+        offers = campaign.streams[0].offers
+        assert [(o.offer_id, o.share, o.pinned) for o in offers] == [
+            (2001, 60, True),
+            (2002, 40, False),
+        ]
 
 
 def test_offer_reactivation_replaces_without_duplicate(campaigns, session_factory) -> None:

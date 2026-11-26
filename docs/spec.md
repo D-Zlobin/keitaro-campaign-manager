@@ -17,7 +17,7 @@ This document supersedes the behavioral gaps in `docs/spec-seed.md`. The seed re
 - **Offer association**: an offer attached to a stream, with its own state and `share`.
 - **Stream share**: the UI percentage mapped to Keitaro stream `weight`. Active stream shares total 100%.
 - **Offer share**: the percentage mapped to an offer association’s `share`. Active offer shares total 100% within each offer-based stream.
-- **Pinned stream**: an active stream whose percentage is excluded from automatic redistribution. Pinning is local application metadata, not a Keitaro feature.
+- **Pinned offer**: an active offer association whose percentage is excluded from automatic redistribution within its stream. Pinning is local application metadata, not a Keitaro feature.
 - **Baseline**: the last campaign and stream state successfully fetched from Keitaro.
 - **Draft**: the persistent local editable state.
 - **Dirty**: the draft’s Keitaro-managed fields differ from the baseline.
@@ -33,7 +33,7 @@ This document supersedes the behavioral gaps in `docs/spec-seed.md`. The seed re
 4. Display active and disabled streams and their offer associations.
 5. Add and remove offers per stream with equal offer shares.
 6. Soft-delete and restore streams.
-7. Automatically redistribute stream shares while honoring pinned streams.
+7. Automatically redistribute stream shares equally, and offer shares while honoring pinned offers.
 8. Persist drafts across browser reloads and application restarts.
 9. Explicitly pull from and push to Keitaro; never synchronize silently in the background.
 10. Detect stale remote state before pushing and reject conflicting writes.
@@ -189,22 +189,21 @@ Display one row per fetched stream, including disabled rows.
 Columns:
 
 - **Name**: remote stream name plus a visible `Disabled` badge when applicable.
-- **Share**: integer percentage and a Pin/Unpin control.
+- **Share**: integer percentage.
 - **Actions**: `Delete` for an active stream or `Restore` for a disabled stream.
 
 Additional behavior:
 
 - Sort by remote position, then Keitaro stream ID.
 - Disabled rows are visually distinct.
-- Disabled streams have share 0 and cannot be pinned.
+- Disabled streams have share 0.
 - Deleting a stream changes local state to `disabled`; it never removes the local row.
-- Restoring changes local state to `active`; the restored stream starts unpinned.
-- Disabling a stream clears its pin.
+- Restoring changes local state to `active`.
 - Stream names are read-only.
 - The editor does not create new streams.
 - Unsupported remote stream fields must be preserved by sending partial updates only for managed fields.
 
-Each row exposes an expandable offer list. Offer-based streams support adding and removing offers. Pure redirect/action streams, including the Google stream, do not expose offer editing.
+Each row exposes an expandable offer list. Offer-based streams support adding, removing, and pinning offers. Pure redirect/action streams, including the Google stream, do not expose offer editing.
 
 ### 6.7 Stream share calculation
 
@@ -212,49 +211,68 @@ All application-facing stream shares are integers from 0 through 100. The backen
 
 Definitions:
 
-- `A`: active streams.
-- `P`: sum of shares of active pinned streams.
-- `U`: active unpinned streams, sorted by position and then Keitaro stream ID.
-- `R = 100 - P`: share available to `U`.
+- `A`: active streams, sorted by position and then Keitaro stream ID.
 
 Rules:
 
-1. Disabled streams always have share 0 and are excluded from `A`, `P`, and `U`.
-2. `P` must be between 0 and 100 inclusive.
-3. If `U` is non-empty, divide `R` equally:
-   - `base = floor(R / len(U))`.
-   - `remainder = R mod len(U)`.
+1. Disabled streams always have share 0 and are excluded from `A`.
+2. Divide 100 equally over `A`:
+   - `base = floor(100 / len(A))`.
+   - `remainder = 100 mod len(A)`.
    - Assign `base + 1` to the first `remainder` streams in deterministic order and `base` to the rest.
-4. Active pinned shares remain unchanged.
-5. If `U` is empty, the state is valid only when `P = 100`.
-6. Active shares must total exactly 100 after every mutation.
-7. A zero share is valid but must be visually indicated because that active stream receives no weighted rotation traffic.
+3. Active shares must total exactly 100 after every mutation.
+4. A zero share is valid but must be visually indicated because that active stream receives no weighted rotation traffic.
 
-Recalculate after deleting, restoring, pinning, or unpinning a stream. Reject any operation that would make rule 5 impossible; for example, deleting the last unpinned stream while pinned shares total less than 100.
-
-Pinning records the stream’s current computed share and redistributes the remainder. Unpinning makes that stream eligible for equal redistribution. Pin metadata alone is not sent to Keitaro. If toggling a pin does not change any remote-managed value, it does not by itself make the draft dirty.
+Recalculate after deleting or restoring a stream. Stream shares are always redistributed equally; pinning exists only at the offer level (section 6.8).
 
 Examples:
 
-- Three unpinned streams: `34, 33, 33`.
-- Shares `40, 30, 30`, with the first pinned: `40, 30, 30`.
-- Pinning a second stream at 30 leaves the final unpinned stream at 30.
-- If two pinned streams total 70 and two unpinned streams remain, the unpinned streams receive 15 each.
+- Three active streams: `34, 33, 33`.
+- Deleting one of three streams leaves `50, 50`.
 
 ### 6.8 Offer editing
 
 For each offer-based stream:
 
-1. Show active associated offers with their integer shares.
+1. Show active associated offers with their integer shares, a visible `Pinned` badge where applicable, and a Pin/Unpin control.
 2. Provide **Add offer**, which opens a searchable selector of existing non-deleted Keitaro offers.
 3. Exclude offers already actively associated with that stream.
-4. On add, create or reactivate one local association and equally redistribute all active offer shares in that stream.
+4. On add, create or reactivate one local association and redistribute the active offer shares in that stream.
 5. On remove, mark only the association disabled and remove it from the active list. Do not delete or modify the global Keitaro offer.
 6. Re-adding a previously removed offer reactivates its existing association instead of creating a duplicate.
-7. Use the same deterministic integer rounding algorithm as stream shares, ordering associations by Keitaro association ID and then offer ID.
-8. An active offer-based stream must contain at least one active offer before upload. The UI may allow the last offer to be removed while the stream is disabled, but restoring that stream requires adding an offer first.
+7. An active offer-based stream must contain at least one active offer before upload. The UI may allow the last offer to be removed while the stream is disabled, but restoring that stream requires adding an offer first.
 
 Changing offers within one stream does not change stream-level shares.
+
+#### Offer share calculation and pinning
+
+Definitions (per offer-based stream):
+
+- `A`: active associations.
+- `P`: sum of shares of active pinned associations.
+- `U`: active unpinned associations, sorted by Keitaro association ID and then offer ID (locally added associations, which have no Keitaro ID yet, sort first).
+- `R = 100 - P`: share available to `U`.
+
+Rules:
+
+1. Removed (disabled) associations always have share 0 and no pin, and are excluded from `A`, `P`, and `U`.
+2. `P` must be between 0 and 100 inclusive.
+3. If `U` is non-empty, divide `R` equally with the same deterministic integer rounding as stream shares, in `U` order.
+4. Active pinned shares remain unchanged.
+5. If `A` is non-empty and `U` is empty, the state is valid only when `P = 100`.
+6. Active shares must total exactly 100 after every mutation.
+7. A zero share is valid but must be visually indicated because that active offer receives no rotation traffic.
+
+Recalculate after adding, removing, pinning, or unpinning an offer. Reject any operation that would make rule 5 impossible; for example, removing the last unpinned active offer while pinned shares total less than 100.
+
+Pinning records the offer's current computed share and redistributes the remainder. Unpinning makes that offer eligible for equal redistribution. Removing an offer clears its pin; a re-added offer starts unpinned. Pin metadata alone is not sent to Keitaro. If toggling a pin does not change any remote-managed value, it does not by itself make the draft dirty.
+
+Examples:
+
+- Three unpinned offers: `34, 33, 33`.
+- Shares `40, 30, 30`, with the first pinned: `40, 30, 30`.
+- Pinning a second offer at 30 leaves the final unpinned offer at 30.
+- If two pinned offers total 70 and two unpinned offers remain, the unpinned offers receive 15 each.
 
 ### 6.9 Local draft persistence and dirty state
 
@@ -418,7 +436,6 @@ The implementation may adjust physical names, but it must preserve these relatio
 - Local UUID primary key and campaign foreign key.
 - Keitaro stream ID, unique per campaign.
 - Name, type, schema, position, state, and integer draft share.
-- Local `pinned` boolean.
 - Baseline raw managed payload or sufficient data to construct partial updates and fingerprints.
 - Created and updated timestamps.
 
@@ -428,6 +445,7 @@ The implementation may adjust physical names, but it must preserve these relatio
 - Nullable Keitaro association ID for a newly added association.
 - Keitaro offer ID and display-name snapshot.
 - Association state and integer draft share.
+- Local `pinned` boolean.
 - Baseline association data where present.
 - Unique active association constraint semantics for `(stream_id, offer_id)`.
 - Created and updated timestamps.
@@ -465,10 +483,10 @@ Store the baseline separately from mutable draft rows so reset, dirty comparison
 
 ### Shares and offers
 
-11. Active stream shares total exactly 100 after every delete, restore, pin, and unpin operation.
+11. Active stream shares total exactly 100 after every delete and restore operation; active offer shares total exactly 100 after every add, remove, pin, and unpin operation.
 12. Disabled streams remain visible, have zero share, and can be restored.
-13. Pinned shares remain fixed while unpinned active streams divide the remainder using deterministic rounding.
-14. Invalid operations that leave no unpinned stream and pinned shares below 100 are rejected without changing the draft.
+13. Pinned offer shares remain fixed while unpinned active offers divide the remainder using deterministic rounding.
+14. Invalid operations that leave no unpinned active offer and pinned shares below 100 are rejected without changing the draft.
 15. Adding, removing, and re-adding offers maintains equal active offer shares within the selected stream and never modifies the global offer.
 16. An active offer-based stream without an active offer cannot be uploaded.
 
@@ -497,5 +515,5 @@ Store the baseline separately from mutable draft rows so reset, dirty comparison
 - Offers are managed per stream with equal active offer shares.
 - Remote conflicts reject the upload and require a refresh; no automatic merge or overwrite occurs.
 - Percentages are integer values with deterministic rounding.
-- Pinning is local-only; disabled streams lose their pins and restore as unpinned.
+- Pinning is local-only offer metadata; removed offers lose their pins and re-add as unpinned. Stream shares always redistribute equally.
 - The initial application is single-operator and has no background synchronization.

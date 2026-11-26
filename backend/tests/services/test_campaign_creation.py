@@ -123,9 +123,9 @@ def test_create_success_persists_baseline_and_draft(
         )
 
         streams = session.scalars(select(Stream).order_by(Stream.position)).all()
-        assert [(s.keitaro_id, s.share, s.pinned) for s in streams] == [
-            (900, 50, False),
-            (901, 50, False),
+        assert [(s.keitaro_id, s.share) for s in streams] == [
+            (900, 50),
+            (901, 50),
         ]
         assert streams[0].baseline_payload["schema"] == "redirect"
         offers = session.scalars(select(StreamOffer)).all()

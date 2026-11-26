@@ -42,7 +42,6 @@ def test_all_state_survives_restart(database_url: str, campaigns) -> None:
                         1001,
                         position=0,
                         share=100,
-                        pinned=True,
                         offers=(
                             draft_offer(
                                 2001,
@@ -50,6 +49,7 @@ def test_all_state_survives_restart(database_url: str, campaigns) -> None:
                                 share=0,
                                 keitaro_association_id=55,
                             ),
+                            draft_offer(2002, share=100, pinned=True),
                         ),
                     ),
                     draft_stream(1002, position=1, share=0, state=StreamState.DISABLED),
@@ -85,17 +85,20 @@ def test_all_state_survives_restart(database_url: str, campaigns) -> None:
             assert campaign.last_fetch_at is not None
             assert campaign.last_upload_at is not None
 
-            assert [(s.keitaro_id, s.share, s.pinned, s.state) for s in campaign.streams] == [
-                (1001, 100, True, StreamState.ACTIVE),
-                (1002, 0, False, StreamState.DISABLED),
+            assert [(s.keitaro_id, s.share, s.state) for s in campaign.streams] == [
+                (1001, 100, StreamState.ACTIVE),
+                (1002, 0, StreamState.DISABLED),
             ]
-            offers = campaign.streams[0].offers
-            assert len(offers) == 1
-            assert offers[0].offer_id == 2001
-            assert offers[0].state is OfferAssociationState.DISABLED
-            assert offers[0].share == 0
-            assert offers[0].keitaro_association_id == 55
-            assert offers[0].baseline_payload is None
+            offers = {o.offer_id: o for o in campaign.streams[0].offers}
+            assert set(offers) == {2001, 2002}
+            assert offers[2001].state is OfferAssociationState.DISABLED
+            assert offers[2001].share == 0
+            assert offers[2001].pinned is False
+            assert offers[2001].keitaro_association_id == 55
+            assert offers[2001].baseline_payload is None
+            # Offer pins are local metadata and must survive a restart too.
+            assert offers[2002].share == 100
+            assert offers[2002].pinned is True
 
             snapshots = session.scalars(
                 sa.select(BaselineSnapshot).where(BaselineSnapshot.campaign_id == campaign_id)

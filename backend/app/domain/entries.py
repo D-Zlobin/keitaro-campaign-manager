@@ -24,18 +24,22 @@ class StreamEntry:
     position: int
     state: StreamState
     share: int
-    pinned: bool = False
     offer_capable: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class OfferEntry:
-    """One offer association as seen by the offer share calculations."""
+    """One offer association as seen by the offer share calculations.
+
+    ``pinned`` is local-only metadata: a pinned active offer keeps its share
+    while the remaining active offers split the rest (spec section 6.8).
+    """
 
     offer_id: int
     state: OfferAssociationState
     share: int
     keitaro_association_id: int | None = None
+    pinned: bool = False
 
 
 def offer_sort_key(offer: OfferEntry) -> tuple[int, int]:
@@ -62,8 +66,8 @@ class DraftAssociationState:
 class DraftStreamState:
     """One draft stream as seen by the update planner.
 
-    Unlike :class:`StreamEntry` this carries no position or pin: neither is a
-    Keitaro-managed field, so they can never produce an update.
+    Unlike :class:`StreamEntry` this carries no position: position is not a
+    Keitaro-managed field, so it can never produce an update.
     """
 
     keitaro_id: int

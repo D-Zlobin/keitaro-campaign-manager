@@ -66,26 +66,9 @@ export function StreamsTable({
                 <td>
                   <span className="stream-name">{stream.name}</span>
                   {!active && <span className="badge badge-disabled">Disabled</span>}
-                  {stream.pinned && <span className="badge badge-pinned">Pinned</span>}
                 </td>
                 <td>
                   <ShareValue share={stream.share} active={active} />
-                  {active && (
-                    <button
-                      type="button"
-                      className="pin-button"
-                      aria-pressed={stream.pinned}
-                      disabled={disabled}
-                      onClick={() =>
-                        onCommand({
-                          type: stream.pinned ? 'unpin_stream' : 'pin_stream',
-                          stream_id: stream.keitaro_id,
-                        })
-                      }
-                    >
-                      {stream.pinned ? 'Unpin' : 'Pin'}
-                    </button>
-                  )}
                 </td>
                 <td>
                   {stream.offer_capable ? (
@@ -190,8 +173,26 @@ function OfferPanel({ campaignId, stream, disabled, onCommand }: OfferPanelProps
         <ul className="offer-list">
           {activeOffers.map((offer) => (
             <li key={offer.offer_id} className="offer-list-item">
-              <span className="offer-name">{offer.offer_name}</span>
-              <ShareValue share={offer.share} active={activeOffers.length > 0} />
+              <span className="offer-name">
+                {offer.offer_name}
+                {offer.pinned && <span className="badge badge-pinned">Pinned</span>}
+              </span>
+              <ShareValue share={offer.share} active />
+              <button
+                type="button"
+                className="pin-button"
+                aria-pressed={offer.pinned}
+                disabled={disabled}
+                onClick={() =>
+                  onCommand({
+                    type: offer.pinned ? 'unpin_offer' : 'pin_offer',
+                    stream_id: stream.keitaro_id,
+                    offer_id: offer.offer_id,
+                  })
+                }
+              >
+                {offer.pinned ? 'Unpin' : 'Pin'}
+              </button>
               <button
                 type="button"
                 className="danger"

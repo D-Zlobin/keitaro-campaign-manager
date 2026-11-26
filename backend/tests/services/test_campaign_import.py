@@ -60,9 +60,9 @@ def test_import_persists_baseline_and_draft(
         assert snapshot.source.value == "fetch"
 
         streams = session.scalars(select(Stream).order_by(Stream.position)).all()
-        assert [(s.keitaro_id, s.share, s.pinned, s.state.value) for s in streams] == [
-            (900, 50, False, "active"),
-            (901, 50, False, "active"),
+        assert [(s.keitaro_id, s.share, s.state.value) for s in streams] == [
+            (900, 50, "active"),
+            (901, 50, "active"),
         ]
         (offer,) = session.scalars(select(StreamOffer)).all()
         assert offer.offer_id == DEFAULT_OFFER_ID

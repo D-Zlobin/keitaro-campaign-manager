@@ -140,7 +140,6 @@ def _draft_inputs(normalized: NormalizedFetch) -> list[DraftStreamInput]:
             position=stream.position,
             state=stream.state,
             share=stream.share,
-            pinned=False,
             baseline_payload=stream.baseline_payload,
             offers=tuple(
                 DraftOfferInput(
@@ -149,6 +148,7 @@ def _draft_inputs(normalized: NormalizedFetch) -> list[DraftStreamInput]:
                     state=offer.state,
                     share=offer.share,
                     keitaro_association_id=offer.keitaro_association_id,
+                    pinned=False,
                     baseline_payload=offer.baseline_payload,
                 )
                 for offer in stream.offers

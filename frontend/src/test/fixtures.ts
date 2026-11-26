@@ -27,7 +27,6 @@ export function makeGoogleStream(overrides: Partial<DraftStream> = {}): DraftStr
     position: 0,
     state: 'active',
     share: 50,
-    pinned: false,
     offer_capable: false,
     offers: [],
     ...overrides,
@@ -43,7 +42,6 @@ export function makeOfferStream(overrides: Partial<DraftStream> = {}): DraftStre
     position: 1,
     state: 'active',
     share: 50,
-    pinned: false,
     offer_capable: true,
     offers: [
       {
@@ -52,6 +50,7 @@ export function makeOfferStream(overrides: Partial<DraftStream> = {}): DraftStre
         keitaro_association_id: 7001,
         state: 'active',
         share: 100,
+        pinned: false,
       },
     ],
     ...overrides,

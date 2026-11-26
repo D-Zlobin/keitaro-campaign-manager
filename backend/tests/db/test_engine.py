@@ -39,9 +39,9 @@ def test_foreign_keys_enforced_for_raw_inserts(migrated_database_url: str) -> No
                 connection.execute(
                     text(
                         "INSERT INTO streams (id, campaign_id, keitaro_id, name, type, "
-                        '"schema", position, state, share, pinned, baseline_payload, '
+                        '"schema", position, state, share, baseline_payload, '
                         "created_at, updated_at) VALUES (randomblob(16), randomblob(16), "
-                        "1, 's', 'regular', 'landings', 0, 'active', 50, 0, '{}', "
+                        "1, 's', 'regular', 'landings', 0, 'active', 50, '{}', "
                         "'2026-01-01', '2026-01-01')"
                     )
                 )

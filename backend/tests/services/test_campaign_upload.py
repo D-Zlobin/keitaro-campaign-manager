@@ -20,7 +20,7 @@ from app.api.schemas import (
     AddOfferCommand,
     DeleteStreamCommand,
     DraftCommand,
-    PinStreamCommand,
+    PinOfferCommand,
     RemoveOfferCommand,
 )
 from app.db.engine import build_engine, make_session_factory
@@ -47,6 +47,7 @@ from tests.fakes import DEFAULT_OFFER_ID, FakeKeitaroAdapter
 
 COMMAND = CreateCampaignCommand(name="Example DE", country_code="DE", offer_id=DEFAULT_OFFER_ID)
 SECOND_OFFER_ID = 18002
+THIRD_OFFER_ID = 18003
 
 # Keitaro IDs assigned by the fake during creation (see tests/fakes.py).
 KEITARO_CAMPAIGN_ID = 500
@@ -93,18 +94,32 @@ def _streams(session_factory: sessionmaker[Session], campaign_id: uuid.UUID) -> 
 
 
 def _draft_offers(
-    session_factory: sessionmaker[Session], campaign_id: uuid.UUID
-) -> dict[int, tuple[OfferAssociationState, int, int | None]]:
-    """Materialized draft offers by offer ID: (state, share, association ID)."""
+    session_factory: sessionmaker[Session],
+    campaign_id: uuid.UUID,
+    stream_keitaro_id: int | None = None,
+) -> dict[int, tuple[OfferAssociationState, int, int | None, bool]]:
+    """Materialized draft offers by offer ID: (state, share, association ID, pin).
+
+    Optionally scoped to one stream — the same offer ID may be associated in
+    several streams of a campaign.
+    """
     with session_factory() as session:
-        offers = session.scalars(
+        query = (
             select(StreamOffer)
             .join(Stream)
             .where(Stream.campaign_id == campaign_id)
             .order_by(StreamOffer.keitaro_association_id, StreamOffer.offer_id)
         )
+        if stream_keitaro_id is not None:
+            query = query.where(Stream.keitaro_id == stream_keitaro_id)
+        offers = session.scalars(query)
         return {
-            offer.offer_id: (offer.state, offer.share, offer.keitaro_association_id)
+            offer.offer_id: (
+                offer.state,
+                offer.share,
+                offer.keitaro_association_id,
+                offer.pinned,
+            )
             for offer in offers
         }
 
@@ -191,9 +206,9 @@ def test_successful_upload_updates_remote_and_marks_clean(
     campaign = _campaign(session_factory, campaign_id)
     assert campaign.baseline_fingerprint != fingerprint_before
     assert [s["weight"] for s in campaign.baseline_canonical["streams"]] == [0, 100]
-    assert [(s.state, s.share, s.pinned) for s in _streams(session_factory, campaign_id)] == [
-        (StreamState.DISABLED, 0, False),
-        (StreamState.ACTIVE, 100, False),
+    assert [(s.state, s.share) for s in _streams(session_factory, campaign_id)] == [
+        (StreamState.DISABLED, 0),
+        (StreamState.ACTIVE, 100),
     ]
 
 
@@ -575,7 +590,9 @@ def test_failed_compensation_marks_needs_attention_until_recovery(
         draft_service.apply_draft_command(
             campaign_id,
             expected_revision=2,
-            command=PinStreamCommand(type="pin_stream", stream_id=OFFER_STREAM_ID),
+            command=PinOfferCommand(
+                type="pin_offer", stream_id=OFFER_STREAM_ID, offer_id=DEFAULT_OFFER_ID
+            ),
         )
     with pytest.raises(ConflictError):
         service.fetch_campaign(campaign_id, confirm_discard=False)
@@ -657,19 +674,42 @@ def test_post_upload_fetch_failure_marks_needs_attention(
 # Post-upload normalization and honesty -------------------------------------------
 
 
-def test_upload_normalization_marks_dirty_and_drops_incompatible_pins(
+def _seed_pinned_three_offer_stream(
     service: CampaignService,
-    upload_service: UploadService,
     draft_service: DraftService,
     fake_keitaro: FakeKeitaroAdapter,
     session_factory: sessionmaker[Session],
-) -> None:
+) -> uuid.UUID:
+    """Three-stream import; stream 900 ends with offers 33(pinned)/34/33.
+
+    The pinned share (33) differs from what an equal three-way split assigns
+    to the first association (34), so a normalization that redistributes the
+    offers changes the pinned share and must drop the pin.
+    """
+    fake_keitaro.offers[SECOND_OFFER_ID] = KeitaroOffer(
+        id=SECOND_OFFER_ID, name="Second Offer", state="active"
+    )
+    fake_keitaro.offers[THIRD_OFFER_ID] = KeitaroOffer(
+        id=THIRD_OFFER_ID, name="Third Offer", state="active"
+    )
     campaign_id = _import_three_stream_campaign(service, fake_keitaro)
     _apply(
         draft_service,
         session_factory,
         campaign_id,
-        PinStreamCommand(type="pin_stream", stream_id=900),
+        AddOfferCommand(type="add_offer", stream_id=900, offer_id=SECOND_OFFER_ID),
+    )
+    _apply(
+        draft_service,
+        session_factory,
+        campaign_id,
+        AddOfferCommand(type="add_offer", stream_id=900, offer_id=THIRD_OFFER_ID),
+    )
+    _apply(
+        draft_service,
+        session_factory,
+        campaign_id,
+        PinOfferCommand(type="pin_offer", stream_id=900, offer_id=DEFAULT_OFFER_ID),
     )
     _apply(
         draft_service,
@@ -677,25 +717,50 @@ def test_upload_normalization_marks_dirty_and_drops_incompatible_pins(
         campaign_id,
         DeleteStreamCommand(type="delete_stream", stream_id=902),
     )
-    # Keitaro applies a different weight for stream 901 inside the
-    # non-atomic window, leaving active shares at 90 instead of 100.
-    fake_keitaro.post_write_hook = lambda fake: fake.touch_stream(901, weight=50)
+    return campaign_id
+
+
+def _skew_stream_900_offer_shares(fake: FakeKeitaroAdapter, shares: dict[int, int]) -> None:
+    stream = fake.streams[900]
+    fake.touch_stream(
+        900,
+        offers=[
+            association.model_copy(update={"share": shares[association.offer_id]})
+            for association in stream.offers
+        ],
+    )
+
+
+def test_upload_normalization_marks_dirty_and_drops_incompatible_pins(
+    service: CampaignService,
+    upload_service: UploadService,
+    draft_service: DraftService,
+    fake_keitaro: FakeKeitaroAdapter,
+    session_factory: sessionmaker[Session],
+) -> None:
+    campaign_id = _seed_pinned_three_offer_stream(
+        service, draft_service, fake_keitaro, session_factory
+    )
+    # Keitaro applies skewed offer shares inside the non-atomic window,
+    # leaving active offer shares at 30 instead of 100.
+    fake_keitaro.post_write_hook = lambda fake: _skew_stream_900_offer_shares(
+        fake, {DEFAULT_OFFER_ID: 10, SECOND_OFFER_ID: 10, THIRD_OFFER_ID: 10}
+    )
 
     result = upload_service.upload_campaign(campaign_id)
 
     assert result.campaign.dirty is True
     assert result.campaign.sync_state == "dirty"
     assert any("redistributed" in notice for notice in result.notices)
-    assert _VALUES_DIFFER_NOTICE in result.notices
-    # The draft shows the truthful normalized state; the pin on stream 900 was
-    # dropped because its share changed (40 -> 50).
-    assert [(s.share, s.pinned) for s in _streams(session_factory, campaign_id)] == [
-        (50, False),
-        (50, False),
-        (0, False),
-    ]
+    # The draft shows the truthful normalized state; the pin on the default
+    # offer was dropped because its share changed (33 -> 34).
+    draft_offers = _draft_offers(session_factory, campaign_id, stream_keitaro_id=900)
+    assert [
+        (draft_offers[offer_id][1], draft_offers[offer_id][3])
+        for offer_id in (DEFAULT_OFFER_ID, SECOND_OFFER_ID, THIRD_OFFER_ID)
+    ] == [(34, False), (33, False), (33, False)]
     campaign = _campaign(session_factory, campaign_id)
-    assert [s["weight"] for s in campaign.baseline_canonical["streams"]] == [40, 50, 0]
+    assert [s["weight"] for s in campaign.baseline_canonical["streams"]] == [50, 50, 0]
 
 
 def test_upload_values_differ_keeps_intended_draft_dirty(
@@ -705,24 +770,15 @@ def test_upload_values_differ_keeps_intended_draft_dirty(
     fake_keitaro: FakeKeitaroAdapter,
     session_factory: sessionmaker[Session],
 ) -> None:
-    campaign_id = _import_three_stream_campaign(service, fake_keitaro)
-    _apply(
-        draft_service,
-        session_factory,
-        campaign_id,
-        PinStreamCommand(type="pin_stream", stream_id=900),
-    )
-    _apply(
-        draft_service,
-        session_factory,
-        campaign_id,
-        DeleteStreamCommand(type="delete_stream", stream_id=902),
+    campaign_id = _seed_pinned_three_offer_stream(
+        service, draft_service, fake_keitaro, session_factory
     )
 
     def diverge(fake: FakeKeitaroAdapter) -> None:
-        # Keitaro stores a valid 50/50 split instead of the uploaded 40/60.
-        fake.touch_stream(900, weight=50)
-        fake.touch_stream(901, weight=50)
+        # Keitaro stores a valid 40/30/30 offer split instead of 33/34/33.
+        _skew_stream_900_offer_shares(
+            fake, {DEFAULT_OFFER_ID: 40, SECOND_OFFER_ID: 30, THIRD_OFFER_ID: 30}
+        )
 
     fake_keitaro.post_write_hook = diverge
 
@@ -733,11 +789,12 @@ def test_upload_values_differ_keeps_intended_draft_dirty(
     assert result.campaign.dirty is True
     assert result.campaign.sync_state == "dirty"
     assert result.notices == [_VALUES_DIFFER_NOTICE]
-    assert [(s.share, s.pinned) for s in _streams(session_factory, campaign_id)] == [
-        (40, True),
-        (60, False),
-        (0, False),
-    ]
+    # The intended draft (and its offer pin) survives for review/re-upload.
+    draft_offers = _draft_offers(session_factory, campaign_id, stream_keitaro_id=900)
+    assert [
+        (draft_offers[offer_id][1], draft_offers[offer_id][3])
+        for offer_id in (DEFAULT_OFFER_ID, SECOND_OFFER_ID, THIRD_OFFER_ID)
+    ] == [(33, True), (34, False), (33, False)]
     campaign = _campaign(session_factory, campaign_id)
     assert [s["weight"] for s in campaign.baseline_canonical["streams"]] == [50, 50, 0]
 

@@ -50,7 +50,6 @@ def _stream(campaign_id: uuid.UUID, **overrides) -> Stream:
         "position": 0,
         "state": StreamState.ACTIVE,
         "share": 50,
-        "pinned": False,
         "baseline_payload": {"id": 1001},
     }
     values.update(overrides)

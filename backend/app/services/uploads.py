@@ -51,9 +51,9 @@ from app.db.models import BaselineSource, SyncState
 from app.domain.canonical import build_canonical_document, fingerprint_canonical, fingerprint_remote
 from app.domain.entries import DraftAssociationState, DraftStreamState, OfferEntry, StreamEntry
 from app.domain.errors import DomainError, OfferRuleViolationError, StreamRuleViolationError
-from app.domain.offers import validate_active_stream_offers
+from app.domain.offers import validate_active_stream_offers, validate_offer_share_invariants
 from app.domain.shares import validate_share_invariants
-from app.domain.states import OfferAssociationState, StreamState
+from app.domain.states import OfferAssociationState
 from app.domain.update_plan import StreamUpdate, is_dirty, plan_updates
 from app.errors import ConflictError, NotFoundError, RuleViolationError, UpstreamError
 from app.keitaro.adapter import KeitaroAdapter
@@ -75,7 +75,6 @@ from app.services.campaigns import _campaign_summary, _read_error
 logger = logging.getLogger(__name__)
 
 CAMPAIGN_STATE_DELETED = "deleted"
-TOTAL_SHARE = 100
 
 _VALUES_DIFFER_NOTICE = (
     "Keitaro returned different values than the uploaded draft; "
@@ -215,7 +214,6 @@ def _stream_entries(streams: Sequence[DraftStreamInput]) -> list[StreamEntry]:
             position=stream.position,
             state=stream.state,
             share=stream.share,
-            pinned=stream.pinned,
             offer_capable=stream.schema == STREAM_SCHEMA_OFFER_CAPABLE,
         )
         for stream in streams
@@ -238,15 +236,8 @@ def _validate_draft(streams: Sequence[DraftStreamInput]) -> None:
                 for offer in stream.offers
             ]
             validate_active_stream_offers(entry, offers)
-            if entry.offer_capable and entry.state is StreamState.ACTIVE:
-                active_total = sum(
-                    offer.share for offer in offers if offer.state is OfferAssociationState.ACTIVE
-                )
-                if active_total != TOTAL_SHARE:
-                    raise OfferRuleViolationError(
-                        f"Active offer shares of stream {entry.keitaro_id} total "
-                        f"{active_total}, expected {TOTAL_SHARE}"
-                    )
+            if entry.offer_capable:
+                validate_offer_share_invariants(offers)
     except (StreamRuleViolationError, OfferRuleViolationError) as exc:
         raise RuleViolationError(str(exc), code="invalid_draft") from exc
 
@@ -256,18 +247,35 @@ def _normalized_inputs(
 ) -> list[DraftStreamInput]:
     """Draft rows from the fetched (normalized) remote state.
 
-    A pin survives only on a stream that is still active with its share
-    unchanged, so the pin keeps recording the share it was set at.
+    An offer pin survives only on an association that is still active with
+    its share unchanged, so the pin keeps recording the share it was set at.
     """
     inputs: list[DraftStreamInput] = []
     for stream in normalized.streams:
         intended = intended_by_id.get(stream.keitaro_id)
-        pinned = bool(
-            intended is not None
-            and intended.pinned
-            and stream.state is StreamState.ACTIVE
-            and stream.share == intended.share
+        intended_offers = (
+            {offer.offer_id: offer for offer in intended.offers} if intended is not None else {}
         )
+        offers: list[DraftOfferInput] = []
+        for offer in stream.offers:
+            intended_offer = intended_offers.get(offer.offer_id)
+            pinned = bool(
+                intended_offer is not None
+                and intended_offer.pinned
+                and offer.state is OfferAssociationState.ACTIVE
+                and offer.share == intended_offer.share
+            )
+            offers.append(
+                DraftOfferInput(
+                    offer_id=offer.offer_id,
+                    offer_name=offer.offer_name,
+                    state=offer.state,
+                    share=offer.share,
+                    keitaro_association_id=offer.keitaro_association_id,
+                    pinned=pinned,
+                    baseline_payload=offer.baseline_payload,
+                )
+            )
         inputs.append(
             DraftStreamInput(
                 keitaro_id=stream.keitaro_id,
@@ -277,19 +285,8 @@ def _normalized_inputs(
                 position=stream.position,
                 state=stream.state,
                 share=stream.share,
-                pinned=pinned,
                 baseline_payload=stream.baseline_payload,
-                offers=tuple(
-                    DraftOfferInput(
-                        offer_id=offer.offer_id,
-                        offer_name=offer.offer_name,
-                        state=offer.state,
-                        share=offer.share,
-                        keitaro_association_id=offer.keitaro_association_id,
-                        baseline_payload=offer.baseline_payload,
-                    )
-                    for offer in stream.offers
-                ),
+                offers=tuple(offers),
             )
         )
     return inputs
@@ -328,6 +325,7 @@ def _rebound_intended_inputs(
                         if offer.keitaro_association_id is not None
                         else (fetched.keitaro_association_id if fetched is not None else None)
                     ),
+                    pinned=offer.pinned,
                     baseline_payload=(
                         fetched.baseline_payload if fetched is not None else offer.baseline_payload
                     ),
@@ -342,7 +340,6 @@ def _rebound_intended_inputs(
                 position=stream.position,
                 state=stream.state,
                 share=stream.share,
-                pinned=stream.pinned,
                 baseline_payload=stream.baseline_payload,
                 offers=tuple(offers),
             )
@@ -393,7 +390,6 @@ class UploadService:
                     position=stream.position,
                     state=stream.state,
                     share=stream.share,
-                    pinned=stream.pinned,
                     baseline_payload=stream.baseline_payload,
                     offers=tuple(
                         DraftOfferInput(
@@ -402,6 +398,7 @@ class UploadService:
                             state=offer.state,
                             share=offer.share,
                             keitaro_association_id=offer.keitaro_association_id,
+                            pinned=offer.pinned,
                             baseline_payload=offer.baseline_payload,
                         )
                         for offer in stream.offers

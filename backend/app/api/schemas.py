@@ -132,6 +132,7 @@ class DraftOffer(BaseModel):
     keitaro_association_id: int | None
     state: OfferAssociationState
     share: int
+    pinned: bool
 
 
 class DraftStream(BaseModel):
@@ -150,7 +151,6 @@ class DraftStream(BaseModel):
     position: int
     state: StreamState
     share: int
-    pinned: bool
     offer_capable: bool
     offers: list[DraftOffer]
 
@@ -179,18 +179,20 @@ class RestoreStreamCommand(BaseModel):
     stream_id: int = Field(gt=0)
 
 
-class PinStreamCommand(BaseModel):
+class PinOfferCommand(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["pin_stream"]
+    type: Literal["pin_offer"]
     stream_id: int = Field(gt=0)
+    offer_id: int = Field(gt=0)
 
 
-class UnpinStreamCommand(BaseModel):
+class UnpinOfferCommand(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["unpin_stream"]
+    type: Literal["unpin_offer"]
     stream_id: int = Field(gt=0)
+    offer_id: int = Field(gt=0)
 
 
 class AddOfferCommand(BaseModel):
@@ -210,13 +212,13 @@ class RemoveOfferCommand(BaseModel):
 
 
 # The only editable draft operations (spec sections 6.6-6.8): soft delete and
-# restore, pin and unpin, add and remove/reactivate offer. Stream creation,
-# renames, and manual percentages are deliberately not expressible.
+# restore, pin and unpin offer, add and remove/reactivate offer. Stream
+# creation, renames, and manual percentages are deliberately not expressible.
 DraftCommand = Annotated[
     DeleteStreamCommand
     | RestoreStreamCommand
-    | PinStreamCommand
-    | UnpinStreamCommand
+    | PinOfferCommand
+    | UnpinOfferCommand
     | AddOfferCommand
     | RemoveOfferCommand,
     Field(discriminator="type"),
