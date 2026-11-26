@@ -497,6 +497,14 @@ th {
   flex: 1;
 }
 
+.offer-list-item-disabled {
+  color: #7b8794;
+}
+
+.offer-list-item-disabled .offer-name {
+  text-decoration: line-through;
+}
+
 .offer-add {
   display: flex;
   align-items: flex-start;

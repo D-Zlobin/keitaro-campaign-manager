@@ -148,7 +148,6 @@ interface OfferPanelProps {
 function OfferPanel({ campaignId, stream, disabled, onCommand }: OfferPanelProps) {
   const [pendingOffer, setPendingOffer] = useState<OfferOption | null>(null)
   const [autocompleteKey, setAutocompleteKey] = useState(0)
-  const activeOffers = stream.offers.filter((offer) => offer.state === 'active')
 
   const addOffer = async () => {
     if (!pendingOffer) {
@@ -167,48 +166,73 @@ function OfferPanel({ campaignId, stream, disabled, onCommand }: OfferPanelProps
 
   return (
     <div className="offers-panel" id={`offers-panel-${stream.keitaro_id}`}>
-      {activeOffers.length === 0 ? (
+      {stream.offers.length === 0 ? (
         <p className="offers-empty">No active offers in this stream.</p>
       ) : (
         <ul className="offer-list">
-          {activeOffers.map((offer) => (
-            <li key={offer.offer_id} className="offer-list-item">
-              <span className="offer-name">
-                {offer.offer_name}
-                {offer.pinned && <span className="badge badge-pinned">Pinned</span>}
-              </span>
-              <ShareValue share={offer.share} active />
-              <button
-                type="button"
-                className="pin-button"
-                aria-pressed={offer.pinned}
-                disabled={disabled}
-                onClick={() =>
-                  onCommand({
-                    type: offer.pinned ? 'unpin_offer' : 'pin_offer',
-                    stream_id: stream.keitaro_id,
-                    offer_id: offer.offer_id,
-                  })
-                }
+          {stream.offers.map((offer) => {
+            const active = offer.state === 'active'
+            return (
+              <li
+                key={offer.offer_id}
+                className={active ? 'offer-list-item' : 'offer-list-item offer-list-item-disabled'}
               >
-                {offer.pinned ? 'Unpin' : 'Pin'}
-              </button>
-              <button
-                type="button"
-                className="danger"
-                disabled={disabled}
-                onClick={() =>
-                  onCommand({
-                    type: 'remove_offer',
-                    stream_id: stream.keitaro_id,
-                    offer_id: offer.offer_id,
-                  })
-                }
-              >
-                Remove
-              </button>
-            </li>
-          ))}
+                <span className="offer-name">
+                  {offer.offer_name}
+                  {offer.pinned && <span className="badge badge-pinned">Pinned</span>}
+                  {!active && <span className="badge badge-disabled">Disabled</span>}
+                </span>
+                <ShareValue share={offer.share} active={active} />
+                {active ? (
+                  <>
+                    <button
+                      type="button"
+                      className="pin-button"
+                      aria-pressed={offer.pinned}
+                      disabled={disabled}
+                      onClick={() =>
+                        onCommand({
+                          type: offer.pinned ? 'unpin_offer' : 'pin_offer',
+                          stream_id: stream.keitaro_id,
+                          offer_id: offer.offer_id,
+                        })
+                      }
+                    >
+                      {offer.pinned ? 'Unpin' : 'Pin'}
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      disabled={disabled}
+                      onClick={() =>
+                        onCommand({
+                          type: 'remove_offer',
+                          stream_id: stream.keitaro_id,
+                          offer_id: offer.offer_id,
+                        })
+                      }
+                    >
+                      Remove
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() =>
+                      onCommand({
+                        type: 'add_offer',
+                        stream_id: stream.keitaro_id,
+                        offer_id: offer.offer_id,
+                      })
+                    }
+                  >
+                    Restore
+                  </button>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
       <div className="offer-add">

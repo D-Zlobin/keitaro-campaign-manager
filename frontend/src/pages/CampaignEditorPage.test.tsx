@@ -287,32 +287,82 @@ describe('CampaignEditorPage — offer editing', () => {
     expect(url.searchParams.get('stream_id')).toBe('9102')
   })
 
-  it('removes an offer through the draft API', async () => {
-    const after = makeDetail({
-      campaign: makeSummary({ sync_state: 'dirty', dirty: true, revision: 2 }),
-      streams: [makeGoogleStream(), makeOfferStream({ offers: [] })],
+  it('keeps a removed offer locally and restores it through the draft API', async () => {
+    const alpha = makeOfferStream().offers[0]
+    const beta = {
+      offer_id: 18002,
+      offer_name: 'Beta Finance Offer',
+      keitaro_association_id: 7002,
+      state: 'active' as const,
+      share: 50,
+      pinned: false,
+    }
+    const initial = makeDetail({
+      streams: [makeGoogleStream(), makeOfferStream({ offers: [{ ...alpha, share: 50 }, beta] })],
     })
-    renderEditor(makeDetail(), [
+    const removed = makeDetail({
+      campaign: makeSummary({ sync_state: 'dirty', dirty: true, revision: 2 }),
+      streams: [
+        makeGoogleStream(),
+        makeOfferStream({
+          offers: [
+            { ...alpha, state: 'disabled', share: 0 },
+            { ...beta, share: 100 },
+          ],
+        }),
+      ],
+    })
+    const restored = makeDetail({
+      campaign: makeSummary({ sync_state: 'dirty', dirty: true, revision: 3 }),
+      streams: [makeGoogleStream(), makeOfferStream({ offers: [{ ...alpha, share: 50 }, beta] })],
+    })
+    renderEditor(initial, [
       {
         method: 'PUT',
         path: '/api/v1/campaigns/:id/draft',
         handler: ({ body }) => {
+          const request = body as {
+            expected_revision: number
+            command: { type: string }
+          }
+          if (request.command.type === 'remove_offer') {
+            expect(body).toEqual({
+              expected_revision: 1,
+              command: { type: 'remove_offer', stream_id: 9102, offer_id: 18001 },
+            })
+            return jsonResponse(removed)
+          }
           expect(body).toEqual({
-            expected_revision: 1,
-            command: { type: 'remove_offer', stream_id: 9102, offer_id: 18001 },
+            expected_revision: 2,
+            command: { type: 'add_offer', stream_id: 9102, offer_id: 18001 },
           })
-          return jsonResponse(after)
+          return jsonResponse(restored)
         },
       },
     ])
     const user = userEvent.setup()
 
     await user.click(
-      within(await streamRow('Offer — 18001')).getByRole('button', { name: '1 offer' }),
+      within(await streamRow('Offer — 18001')).getByRole('button', { name: '2 offers' }),
     )
-    await user.click(await screen.findByRole('button', { name: 'Remove' }))
+    const activeOffer = (await screen.findByText('Alpha Diet Offer')).closest('li') as HTMLElement
+    await user.click(within(activeOffer).getByRole('button', { name: 'Remove' }))
 
-    expect(await screen.findByText('No active offers in this stream.')).toBeInTheDocument()
+    const disabledBadge = await screen.findByText('Disabled')
+    const disabledOffer = disabledBadge.closest('li') as HTMLElement
+    expect(within(disabledOffer).getByText('Alpha Diet Offer')).toBeInTheDocument()
+    expect(within(disabledOffer).getByText('0%')).toBeInTheDocument()
+    expect(disabledOffer.className).toContain('offer-list-item-disabled')
+    expect(
+      within(await streamRow('Offer — 18001')).getByRole('button', { name: '1 offer' }),
+    ).toBeInTheDocument()
+
+    await user.click(within(disabledOffer).getByRole('button', { name: 'Restore' }))
+
+    const restoredOffer = (await screen.findByText('Alpha Diet Offer')).closest('li') as HTMLElement
+    expect(within(restoredOffer).queryByText('Disabled')).not.toBeInTheDocument()
+    expect(within(restoredOffer).getByText('50%')).toBeInTheDocument()
+    expect(within(restoredOffer).getByRole('button', { name: 'Remove' })).toBeInTheDocument()
   })
 })
 
