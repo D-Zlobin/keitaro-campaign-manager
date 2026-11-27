@@ -17,8 +17,9 @@ Creation (spec section 6.4) runs as an idempotent, compensating sequence:
 
 Import and fetch share the fetch normalization pipeline: remote state is
 normalized into draft input, the baseline stores the raw canonical document
-and fingerprint, and pins are cleared. A dirty (or ``needs_attention``)
-draft requires an explicit confirmation flag before fetch discards it.
+and fingerprint, and pins are cleared. A dirty, ``syncing``, or
+``needs_attention`` draft requires an explicit confirmation flag before fetch
+discards it.
 """
 
 from __future__ import annotations
@@ -576,11 +577,12 @@ class CampaignService:
     ) -> CampaignFetchResponse:
         """Replace baseline and draft with the current remote state.
 
-        Allowed for a clean draft; a dirty or ``needs_attention`` draft is
-        discarded only with ``confirm_discard``. Pins are cleared and the
-        local revision increments. Callers serialize per campaign (the API
-        holds the campaign lock), so a stale revision here means another
-        writer bypassed that lock and surfaces as a 409.
+        Allowed for a clean draft; a dirty, ``syncing``, or
+        ``needs_attention`` draft is discarded only with ``confirm_discard``.
+        Pins are cleared and the local revision increments. Callers serialize
+        per campaign (the API holds the campaign lock), so confirmed recovery
+        from ``syncing`` cannot overlap a live upload. A stale revision here
+        means another writer bypassed that lock and surfaces as a 409.
         """
         with session_scope(self._session_factory) as session:
             campaign = self._campaigns.get_with_draft(session, campaign_id)
@@ -588,7 +590,7 @@ class CampaignService:
                 raise NotFoundError(
                     "Campaign not found.", details={"campaign_id": str(campaign_id)}
                 )
-            if campaign.sync_state is SyncState.SYNCING:
+            if campaign.sync_state is SyncState.SYNCING and not confirm_discard:
                 raise ConflictError(
                     "A synchronization operation is already in progress for this campaign.",
                     code="operation_in_progress",

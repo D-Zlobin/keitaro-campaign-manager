@@ -77,35 +77,32 @@ describe('CampaignEditorPage — primary synchronization button', () => {
     expect(
       within(await streamRow('Google — DE')).getByRole('button', { name: 'Delete' }),
     ).toBeDisabled()
-    const user = userEvent.setup()
-    await user.click(
-      within(await streamRow('Offer — 18001')).getByRole('button', { name: '1 offer' }),
-    )
     expect(screen.getByRole('button', { name: 'Pin' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Remove' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Hard reset from Kitaro' })).toBeEnabled()
+  })
+
+  it('offers hard reset when synchronization is stuck', async () => {
+    renderEditor(
+      makeDetail({
+        campaign: makeSummary({ sync_state: 'syncing' }),
+        upload_blocked: true,
+      }),
+    )
+
+    expect(await screen.findByRole('button', { name: 'Get streams from Keitaro' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Hard reset from Kitaro' })).toBeEnabled()
   })
 })
 
 describe('CampaignEditorPage — streams table', () => {
-  it('renders disabled rows distinctly with a badge, zero share, and Restore', async () => {
+  it('renders disabled rows distinctly with a badge and Restore', async () => {
     renderEditor(dirtyDetail)
 
     const row = await streamRow('Google — DE')
     await within(row).findByText('Disabled')
-    expect(within(row).getByText('0%')).toBeInTheDocument()
     expect(within(row).getByRole('button', { name: 'Restore' })).toBeInTheDocument()
     expect(row.className).toContain('stream-row-disabled')
-  })
-
-  it('marks an active zero-share stream as receiving no traffic', async () => {
-    renderEditor(
-      makeDetail({
-        streams: [makeGoogleStream({ share: 0 }), makeOfferStream({ share: 100 })],
-      }),
-    )
-    expect(
-      await within(await streamRow('Google — DE')).findByText('no traffic'),
-    ).toBeInTheDocument()
   })
 
   it('sends offer pin commands with the current revision; pin-only changes stay clean', async () => {
@@ -141,10 +138,7 @@ describe('CampaignEditorPage — streams table', () => {
     ])
     const user = userEvent.setup()
 
-    await user.click(
-      within(await streamRow('Offer — 18001')).getByRole('button', { name: '1 offer' }),
-    )
-    await user.click(screen.getByRole('button', { name: 'Pin' }))
+    await user.click(await screen.findByRole('button', { name: 'Pin' }))
 
     expect(await screen.findByText('Pinned')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Unpin' })).toBeInTheDocument()
@@ -175,7 +169,6 @@ describe('CampaignEditorPage — streams table', () => {
       await screen.findByRole('button', { name: 'Upload streams to Keitaro' }),
     ).toBeInTheDocument()
     expect(within(await streamRow('Google — DE')).getByText('Disabled')).toBeInTheDocument()
-    expect(within(await streamRow('Offer — 18001')).getByText('100%')).toBeInTheDocument()
   })
 
   it('shows rule violations next to the affected stream', async () => {
@@ -208,18 +201,22 @@ describe('CampaignEditorPage — streams table', () => {
 })
 
 describe('CampaignEditorPage — offer editing', () => {
-  it('expands the offer list only for offer-capable streams', async () => {
+  it('omits stream shares and shows offers by default for offer-capable streams', async () => {
     renderEditor(makeDetail())
     const user = userEvent.setup()
 
+    expect(screen.queryByRole('columnheader', { name: 'Share' })).not.toBeInTheDocument()
     // The redirect (Google) stream exposes no offer editing.
     expect(within(await streamRow('Google — DE')).getByText('—')).toBeInTheDocument()
-
-    await user.click(
-      within(await streamRow('Offer — 18001')).getByRole('button', { name: '1 offer' }),
-    )
     expect(await screen.findByText('Alpha Diet Offer')).toBeInTheDocument()
     expect(screen.getByText('100%')).toBeInTheDocument()
+
+    const toggle = within(await streamRow('Offer — 18001')).getByRole('button', {
+      name: '1 offer',
+    })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await user.click(toggle)
+    expect(screen.queryByText('Alpha Diet Offer')).not.toBeInTheDocument()
   })
 
   it('adds an offer selected from the exclusion-scoped autocomplete', async () => {
@@ -266,11 +263,8 @@ describe('CampaignEditorPage — offer editing', () => {
     ])
     const user = userEvent.setup()
 
-    await user.click(
-      within(await streamRow('Offer — 18001')).getByRole('button', { name: '1 offer' }),
-    )
     await user.type(
-      screen.getByRole('combobox', { name: 'Search offers to add to Offer — 18001' }),
+      await screen.findByRole('combobox', { name: 'Search offers to add to Offer — 18001' }),
       'beta',
     )
     await user.click(await screen.findByRole('option', { name: /Beta Finance Offer/ }))
@@ -342,9 +336,6 @@ describe('CampaignEditorPage — offer editing', () => {
     ])
     const user = userEvent.setup()
 
-    await user.click(
-      within(await streamRow('Offer — 18001')).getByRole('button', { name: '2 offers' }),
-    )
     const activeOffer = (await screen.findByText('Alpha Diet Offer')).closest('li') as HTMLElement
     await user.click(within(activeOffer).getByRole('button', { name: 'Remove' }))
 
@@ -401,6 +392,31 @@ describe('CampaignEditorPage — fetch, discard, and conflicts', () => {
     expect(
       await screen.findByText('Stream 9103 was deleted remotely and was not restored.'),
     ).toBeInTheDocument()
+  })
+
+  it('hard resets the local draft from Keitaro after confirmation', async () => {
+    let fetches = 0
+    renderEditor(makeDetail(), [
+      {
+        method: 'POST',
+        path: '/api/v1/campaigns/:id/fetch',
+        handler: ({ body }) => {
+          fetches += 1
+          expect(body).toEqual({ confirm_discard: true })
+          return jsonResponse({ campaign: makeSummary(), notices: ['Hard reset applied.'] })
+        },
+      },
+    ])
+    const user = userEvent.setup()
+
+    const hardReset = await screen.findByRole('button', { name: 'Hard reset from Kitaro' })
+    expect(hardReset).toHaveClass('danger')
+    await user.click(hardReset)
+    expect(fetches).toBe(0)
+
+    await user.click(screen.getByRole('button', { name: 'Confirm hard reset' }))
+    expect(await screen.findByText('Hard reset applied.')).toBeInTheDocument()
+    expect(fetches).toBe(1)
   })
 
   it('handles a dirty-draft fetch conflict with an explicit discard confirmation', async () => {

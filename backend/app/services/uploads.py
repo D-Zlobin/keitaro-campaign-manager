@@ -97,6 +97,7 @@ def _stream_update_payload(update: StreamUpdate) -> StreamUpdatePayload:
         fields["offers"] = [
             OfferAssociationPayload(offer_id=a.offer_id, share=a.share, state=a.state.value)
             for a in update.associations
+            if a.state is OfferAssociationState.ACTIVE
         ]
     return StreamUpdatePayload(**fields)
 
@@ -106,9 +107,9 @@ def _compensation_payload(
 ) -> StreamUpdatePayload:
     """Inverse of one applied (or attempted) update, restoring baseline values.
 
-    Associations the update created have no baseline counterpart; disabling
-    them restores the baseline because removal is sent as ``disabled`` with
-    share 0 (spec section 7.2).
+    Offer updates replace the complete remote collection. Restoring the
+    baseline collection recreates removed associations and omits associations
+    the update created, causing Keitaro to delete those additions.
     """
     fields: dict[str, Any] = {}
     if update.state is not None:
@@ -116,27 +117,14 @@ def _compensation_payload(
     if update.weight is not None:
         fields["weight"] = _as_int(baseline_stream["weight"])
     if update.associations:
-        baseline_by_offer = {
-            int(entry["offer_id"]): entry for entry in baseline_stream.get("offers", [])
-        }
-        offers: list[OfferAssociationPayload] = []
-        for association in update.associations:
-            baseline_assoc = baseline_by_offer.get(association.offer_id)
-            if baseline_assoc is None:
-                offers.append(
-                    OfferAssociationPayload(
-                        offer_id=association.offer_id, share=0, state="disabled"
-                    )
-                )
-            else:
-                offers.append(
-                    OfferAssociationPayload(
-                        offer_id=association.offer_id,
-                        share=_as_int(baseline_assoc["share"]),
-                        state=baseline_assoc["state"],
-                    )
-                )
-        fields["offers"] = offers
+        fields["offers"] = [
+            OfferAssociationPayload(
+                offer_id=int(association["offer_id"]),
+                share=_as_int(association["share"]),
+                state=association["state"],
+            )
+            for association in baseline_stream.get("offers", [])
+        ]
     return StreamUpdatePayload(**fields)
 
 
@@ -249,6 +237,8 @@ def _normalized_inputs(
 
     An offer pin survives only on an association that is still active with
     its share unchanged, so the pin keeps recording the share it was set at.
+    Locally removed offers remain as disabled rows without remote association
+    IDs after Keitaro deletes them from the stream.
     """
     inputs: list[DraftStreamInput] = []
     for stream in normalized.streams:
@@ -257,6 +247,7 @@ def _normalized_inputs(
             {offer.offer_id: offer for offer in intended.offers} if intended is not None else {}
         )
         offers: list[DraftOfferInput] = []
+        fetched_offer_ids = {offer.offer_id for offer in stream.offers}
         for offer in stream.offers:
             intended_offer = intended_offers.get(offer.offer_id)
             pinned = bool(
@@ -276,6 +267,23 @@ def _normalized_inputs(
                     baseline_payload=offer.baseline_payload,
                 )
             )
+        if intended is not None:
+            for offer in intended.offers:
+                if (
+                    offer.state is OfferAssociationState.DISABLED
+                    and offer.offer_id not in fetched_offer_ids
+                ):
+                    offers.append(
+                        DraftOfferInput(
+                            offer_id=offer.offer_id,
+                            offer_name=offer.offer_name,
+                            state=OfferAssociationState.DISABLED,
+                            share=0,
+                            keitaro_association_id=None,
+                            pinned=False,
+                            baseline_payload=None,
+                        )
+                    )
         inputs.append(
             DraftStreamInput(
                 keitaro_id=stream.keitaro_id,
@@ -321,13 +329,19 @@ def _rebound_intended_inputs(
                     state=offer.state,
                     share=offer.share,
                     keitaro_association_id=(
-                        offer.keitaro_association_id
+                        None
+                        if offer.state is OfferAssociationState.DISABLED and fetched is None
+                        else offer.keitaro_association_id
                         if offer.keitaro_association_id is not None
                         else (fetched.keitaro_association_id if fetched is not None else None)
                     ),
                     pinned=offer.pinned,
                     baseline_payload=(
-                        fetched.baseline_payload if fetched is not None else offer.baseline_payload
+                        None
+                        if offer.state is OfferAssociationState.DISABLED and fetched is None
+                        else fetched.baseline_payload
+                        if fetched is not None
+                        else offer.baseline_payload
                     ),
                 )
             )

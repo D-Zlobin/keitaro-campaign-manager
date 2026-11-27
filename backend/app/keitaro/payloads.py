@@ -168,8 +168,9 @@ class StreamUpdatePayload(KeitaroPayload):
     """Partial stream update: only explicitly set fields are sent.
 
     ``to_api_dict`` uses ``exclude_unset`` so unchanged managed fields never
-    reach Keitaro (spec section 7.2). Disabled offer associations are sent
-    with ``state="disabled"`` and disabled streams with ``weight=0``.
+    reach Keitaro (spec section 7.2). Offer updates contain the complete
+    desired association collection; omitted associations are deleted from the
+    stream. Disabled streams are sent with ``weight=0``.
     """
 
     name: str | None = None

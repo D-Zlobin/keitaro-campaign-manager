@@ -32,7 +32,7 @@ function ShareValue({ share, active }: { share: number; active: boolean }) {
   )
 }
 
-/** Streams of the draft with shares, pins, delete/restore, and offer editing. */
+/** Streams of the draft with pins, delete/restore, and offer editing. */
 export function StreamsTable({
   campaignId,
   streams,
@@ -43,14 +43,13 @@ export function StreamsTable({
   const [expanded, setExpanded] = useState<Record<number, boolean>>({})
 
   const toggleExpanded = (streamId: number) =>
-    setExpanded((current) => ({ ...current, [streamId]: !current[streamId] }))
+    setExpanded((current) => ({ ...current, [streamId]: !(current[streamId] ?? true) }))
 
   return (
     <table className="streams-table">
       <thead>
         <tr>
           <th scope="col">Stream</th>
-          <th scope="col">Share</th>
           <th scope="col">Offers</th>
           <th scope="col">Actions</th>
         </tr>
@@ -59,16 +58,13 @@ export function StreamsTable({
         {sortedStreams(streams).map((stream) => {
           const active = stream.state === 'active'
           const activeOffers = stream.offers.filter((offer) => offer.state === 'active')
-          const isExpanded = Boolean(expanded[stream.keitaro_id])
+          const isExpanded = expanded[stream.keitaro_id] ?? true
           return (
             <Fragment key={stream.keitaro_id}>
               <tr className={active ? 'stream-row' : 'stream-row stream-row-disabled'}>
                 <td>
                   <span className="stream-name">{stream.name}</span>
                   {!active && <span className="badge badge-disabled">Disabled</span>}
-                </td>
-                <td>
-                  <ShareValue share={stream.share} active={active} />
                 </td>
                 <td>
                   {stream.offer_capable ? (
@@ -112,14 +108,14 @@ export function StreamsTable({
               </tr>
               {rowErrors[stream.keitaro_id] && (
                 <tr className="stream-error-row">
-                  <td colSpan={4} role="alert">
+                  <td colSpan={3} role="alert">
                     {rowErrors[stream.keitaro_id]}
                   </td>
                 </tr>
               )}
               {stream.offer_capable && isExpanded && (
                 <tr className="offers-panel-row">
-                  <td colSpan={4}>
+                  <td colSpan={3}>
                     <OfferPanel
                       campaignId={campaignId}
                       stream={stream}

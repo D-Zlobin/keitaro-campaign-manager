@@ -67,8 +67,9 @@ CORS allows only `CORS_ALLOWED_ORIGINS` (default `http://localhost:5173`).
   duplicate imports are a 409 and never replace existing state.
 - `POST /api/v1/campaigns/{id}/fetch` — operator-initiated fetch replacing
   baseline and draft (pins cleared, revision incremented, normalization
-  notices returned). A dirty or `needs_attention` draft requires
-  `{"confirm_discard": true}`; without it the fetch is a 409.
+  notices returned). A dirty, `syncing`, or `needs_attention` draft requires
+  `{"confirm_discard": true}`; without it the fetch is a 409. Confirmed
+  recovery from `syncing` is serialized with uploads by the campaign lock.
 - `GET /api/v1/campaigns/{id}` — editor load state: baseline metadata,
   editable streams/offers (with pins and `offer_capable`), revision, dirty
   state, persisted notices, and `upload_blocked`.
@@ -98,7 +99,9 @@ CORS allows only `CORS_ALLOWED_ORIGINS` (default `http://localhost:5173`).
   Before any write the backend re-reads the draft, validates it, and
   compares a fingerprint of the current remote state with the stored
   baseline: a mismatch is a 409 `remote_conflict` with zero remote writes.
-  Only changed managed fields are sent as per-stream partial updates.
+  Only changed managed fields are sent as per-stream partial updates. Offer
+  updates send the complete active association set: removed offers are deleted
+  from the Keitaro stream but remain disabled locally without a remote ID.
   - A clean draft is a 409 `clean_draft`; `syncing`/`needs_attention`
     campaigns are 409; an invalid persisted draft is a 422 `invalid_draft`.
   - On a write failure the attempted updates are compensated in reverse
@@ -163,9 +166,9 @@ Structure (`frontend/src/`):
 - `pages/CampaignEditorPage.tsx` — editor: primary button (**Get streams
   from Keitaro** when clean, **Upload streams to Keitaro** when dirty,
   disabled with progress while running), streams table with Delete/Restore,
-  zero-share indication and disabled rows, expandable offer lists with
-  Pin/Unpin controls and exclusion-scoped offer search, normalization
-  notices, and explicit conflict/stale-revision/`needs_attention` recovery. Every draft
+  disabled rows, default-expanded offer lists with Pin/Unpin controls and
+  exclusion-scoped offer search, normalization notices, and explicit
+  conflict/stale-revision/hard-reset recovery. Every draft
   mutation sends `expected_revision`; server responses are authoritative and
   synchronization is never implicit.
 - Routing is hash-based (`#/`, `#/campaigns/{id}`), so the production build

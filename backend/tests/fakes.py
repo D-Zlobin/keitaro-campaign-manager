@@ -337,10 +337,10 @@ class FakeKeitaroAdapter:
         return updated
 
     def _apply_offer_updates(self, stream_id: int, offers: list[dict[str, Any]]) -> None:
-        """Upsert nested association payloads by offer ID, like Keitaro."""
+        """Replace the nested association collection, like Keitaro."""
         stream = self.streams[stream_id]
-        associations = list(stream.offers)
-        by_offer = {association.offer_id: association for association in associations}
+        by_offer = {association.offer_id: association for association in stream.offers}
+        associations: list[KeitaroOfferAssociation] = []
         now = self._tick()
         for offer_payload in offers:
             existing = by_offer.get(offer_payload["offer_id"])
@@ -358,13 +358,14 @@ class FakeKeitaroAdapter:
                     )
                 )
             else:
-                index = associations.index(existing)
-                associations[index] = existing.model_copy(
-                    update={
-                        "state": offer_payload.get("state", existing.state),
-                        "share": offer_payload.get("share", existing.share),
-                        "updated_at": now,
-                    }
+                associations.append(
+                    existing.model_copy(
+                        update={
+                            "state": offer_payload.get("state", existing.state),
+                            "share": offer_payload.get("share", existing.share),
+                            "updated_at": now,
+                        }
+                    )
                 )
         self.streams[stream_id] = stream.model_copy(
             update={"offers": associations, "updated_at": now}

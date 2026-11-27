@@ -226,7 +226,7 @@ Enforce these rules in backend domain code and test them independently of HTTP a
 - Implement `POST /campaigns/{id}/upload` using only the persisted draft, with no trust in a client-supplied campaign snapshot.
 - Under the campaign lock, reject clean/invalid/`needs_attention` uploads as appropriate, re-read the draft, fetch current remote state, calculate its fingerprint, and compare it with the stored baseline fingerprint before any write.
 - On mismatch, return 409, preserve draft and baseline, and perform no remote writes.
-- Apply only planned partial updates for changed managed fields, including disabled associations and zero weights for disabled streams. Stop at the first failure.
+- Apply only planned partial updates for changed managed fields, including complete active-offer collection updates that delete removed associations and zero weights for disabled streams. Stop at the first failure.
 - Track completed updates and their baseline inverse operations. After partial failure, attempt compensation in reverse dependency order and verify the result with a fresh remote read/fingerprint comparison.
 - If compensation is confirmed, leave the draft dirty and report the failed operation. If compensation fails or cannot be confirmed, persist `needs_attention`, block further uploads/draft work as required, and require a fresh operator-controlled recovery fetch.
 - After successful writes, fetch the resulting state, replace baseline and draft transactionally, retain offer pins only for compatible surviving active associations, and recalculate if normalization is necessary. Report clean only when the fetched managed state matches the intended values and requires no normalization.

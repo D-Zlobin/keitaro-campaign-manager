@@ -230,6 +230,16 @@ export function CampaignEditorPage({ campaignId }: CampaignEditorPageProps) {
           >
             {primaryLabel}
           </button>
+          {(!dirty || blocked) && (
+            <ConfirmButton
+              label="Hard reset from Kitaro"
+              question="Discard all local changes and replace them with streams from Keitaro?"
+              confirmLabel="Confirm hard reset"
+              className="danger"
+              disabled={busy}
+              onConfirm={() => doFetch(true)}
+            />
+          )}
           {dirty && !blocked && (
             <ConfirmButton
               label="Discard changes and reload"

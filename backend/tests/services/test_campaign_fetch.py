@@ -2,8 +2,8 @@
 
 Covers plan stage 4 fetch behavior: transactional baseline/draft replacement,
 pin clearing, revision increments, normalization/deletion notices, dirty-fetch
-409 with and without confirmation, needs_attention recovery, and upstream
-error mapping.
+409 with and without confirmation, needs_attention and stuck-syncing recovery,
+and upstream error mapping.
 """
 
 from __future__ import annotations
@@ -205,6 +205,24 @@ def test_fetch_while_syncing_is_rejected(
         service.fetch_campaign(campaign_id, confirm_discard=False)
 
     assert exc_info.value.code == "operation_in_progress"
+
+
+def test_confirmed_fetch_recovers_stuck_syncing(
+    service: CampaignService, fake_keitaro: FakeKeitaroAdapter, session_factory
+) -> None:
+    campaign_id = _create(service)
+    with session_factory() as session:
+        CampaignRepository().transition_sync_state(
+            session, campaign_id=campaign_id, to_state=SyncState.SYNCING
+        )
+        session.commit()
+
+    result = service.fetch_campaign(campaign_id, confirm_discard=True)
+
+    assert result.campaign.sync_state == "clean"
+    assert result.campaign.revision == 2
+    with session_factory() as session:
+        assert session.get(Campaign, campaign_id).sync_state is SyncState.CLEAN
 
 
 def test_fetch_unknown_campaign_is_404(service: CampaignService) -> None:

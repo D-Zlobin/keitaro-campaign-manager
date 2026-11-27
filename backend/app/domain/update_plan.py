@@ -7,9 +7,11 @@ are excluded and therefore can never produce an update or make a draft
 dirty.
 
 The plan (spec section 7.2) contains one entry per changed stream with only
-the fields that differ from the baseline, so unchanged streams and
-associations generate no remote writes. Disabled streams are planned with
-``weight=0``; removed associations are planned as ``disabled``.
+the managed fields that differ from the baseline, so unchanged streams generate
+no remote writes. When associations change, the plan carries the complete
+active-offer set because Keitaro replaces that collection on update. Disabled
+streams are planned with ``weight=0``; removed associations are retained as
+disabled plan markers and omitted from the API payload.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from app.domain.states import OfferAssociationState, StreamState
 
 @dataclass(frozen=True, slots=True)
 class AssociationUpdate:
-    """One association write within a stream update."""
+    """One active offer or disabled removal marker in a collection update."""
 
     offer_id: int
     keitaro_association_id: int | None
@@ -67,13 +69,16 @@ def _plan_associations(
         baseline_associations[int(entry["id"])] = entry
         baseline_by_offer[int(entry["offer_id"])] = entry
 
-    updates: list[AssociationUpdate] = []
+    changes: list[AssociationUpdate] = []
+    active_offers: list[AssociationUpdate] = []
     seen_ids: set[int] = set()
     for association in draft.associations:
         baseline_assoc: Mapping[str, Any] | None = None
         if association.keitaro_association_id is not None:
             baseline_assoc = baseline_associations.get(association.keitaro_association_id)
             if baseline_assoc is None:
+                if association.state is OfferAssociationState.DISABLED:
+                    continue
                 raise DomainError(
                     f"Draft association {association.keitaro_association_id} of stream "
                     f"{draft.keitaro_id} is missing from the baseline"
@@ -85,34 +90,29 @@ def _plan_associations(
                 # Known offer without a local association ID: bind to the
                 # baseline association (e.g. rows created before an upload).
                 seen_ids.add(int(baseline_assoc["id"]))
-        if baseline_assoc is None:
-            # New association: send it for creation.
-            if association.state is OfferAssociationState.ACTIVE:
-                updates.append(
-                    AssociationUpdate(
-                        offer_id=association.offer_id,
-                        keitaro_association_id=None,
-                        state=association.state,
-                        share=association.share,
-                    )
-                )
+
+        if baseline_assoc is None and association.state is OfferAssociationState.DISABLED:
             continue
-        baseline_state = baseline_assoc["state"]
-        baseline_share = baseline_assoc["share"]
-        if association.state != baseline_state or int(association.share) != int(baseline_share):
-            updates.append(
-                AssociationUpdate(
-                    offer_id=association.offer_id,
-                    keitaro_association_id=int(baseline_assoc["id"]),
-                    state=association.state,
-                    share=association.share,
-                )
-            )
+        association_id = int(baseline_assoc["id"]) if baseline_assoc is not None else None
+        planned = AssociationUpdate(
+            offer_id=association.offer_id,
+            keitaro_association_id=association_id,
+            state=association.state,
+            share=association.share,
+        )
+        if association.state is OfferAssociationState.ACTIVE:
+            active_offers.append(planned)
+        if (
+            baseline_assoc is None
+            or association.state != baseline_assoc["state"]
+            or int(association.share) != int(baseline_assoc["share"])
+        ):
+            changes.append(planned)
 
     # Baseline associations the draft no longer carries at all are removals.
     for association_id, baseline_assoc in baseline_associations.items():
         if association_id not in seen_ids:
-            updates.append(
+            changes.append(
                 AssociationUpdate(
                     offer_id=int(baseline_assoc["offer_id"]),
                     keitaro_association_id=association_id,
@@ -120,7 +120,14 @@ def _plan_associations(
                     share=0,
                 )
             )
-    return tuple(updates)
+    if not changes:
+        return ()
+    removals = [
+        association
+        for association in changes
+        if association.state is OfferAssociationState.DISABLED
+    ]
+    return tuple([*active_offers, *removals])
 
 
 def plan_updates(

@@ -255,24 +255,43 @@ def test_upload_sends_exact_partial_payloads_for_offer_changes(
                 "weight": 100,
                 "offers": [
                     {"offer_id": SECOND_OFFER_ID, "share": 100, "state": "active"},
-                    {"offer_id": DEFAULT_OFFER_ID, "share": 0, "state": "disabled"},
                 ],
             },
         ),
     ]
-    # Remote associations: the removed offer is disabled, the added one created.
+    # Keitaro deleted the removed association and created the added one.
     remote_offers = {
         association.offer_id: association
         for association in fake_keitaro.streams[OFFER_STREAM_ID].offers
     }
-    assert remote_offers[DEFAULT_OFFER_ID].state == "disabled"
-    assert remote_offers[DEFAULT_OFFER_ID].share == 0
+    assert DEFAULT_OFFER_ID not in remote_offers
     assert remote_offers[SECOND_OFFER_ID].state == "active"
     assert remote_offers[SECOND_OFFER_ID].share == 100
-    # The new association adopted its real Keitaro ID in the persisted draft.
+    # The new association adopted its real Keitaro ID. The removed offer stays
+    # only in the local draft as disabled, without its deleted remote ID.
     draft_offers = _draft_offers(session_factory, campaign_id)
     assert draft_offers[SECOND_OFFER_ID][2] == remote_offers[SECOND_OFFER_ID].id
-    assert draft_offers[DEFAULT_OFFER_ID][0] is OfferAssociationState.DISABLED
+    assert draft_offers[DEFAULT_OFFER_ID] == (OfferAssociationState.DISABLED, 0, None, False)
+
+    _apply(
+        draft_service,
+        session_factory,
+        campaign_id,
+        AddOfferCommand(type="add_offer", stream_id=OFFER_STREAM_ID, offer_id=DEFAULT_OFFER_ID),
+    )
+    restored = upload_service.upload_campaign(campaign_id)
+
+    assert restored.campaign.sync_state == "clean"
+    remote_offers = {
+        association.offer_id: association
+        for association in fake_keitaro.streams[OFFER_STREAM_ID].offers
+    }
+    assert set(remote_offers) == {DEFAULT_OFFER_ID, SECOND_OFFER_ID}
+    assert remote_offers[DEFAULT_OFFER_ID].state == "active"
+    assert remote_offers[DEFAULT_OFFER_ID].id != OFFER_ASSOCIATION_ID
+    draft_offers = _draft_offers(session_factory, campaign_id)
+    assert draft_offers[DEFAULT_OFFER_ID][0] is OfferAssociationState.ACTIVE
+    assert draft_offers[DEFAULT_OFFER_ID][2] == remote_offers[DEFAULT_OFFER_ID].id
 
 
 # Rejections before any remote write --------------------------------------------

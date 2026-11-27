@@ -178,7 +178,7 @@ On an operator-initiated fetch:
 6. Normalize active offer shares within each offer-based stream in the same way.
 7. Store the remote fingerprint and increment the local draft revision.
 
-A normal fetch is allowed only when the draft is clean. If it is dirty, return HTTP 409 and require the operator to choose **Discard changes and reload**. That action requires confirmation and then replaces the draft.
+A normal fetch is allowed only when the draft is clean. If it is dirty, return HTTP 409 and require the operator to choose **Discard changes and reload**. That action requires confirmation and then replaces the draft. A fetch in `syncing` is also rejected without confirmation; a confirmed hard reset may recover a stuck `syncing` state after acquiring the per-campaign operation lock, ensuring it cannot overlap a live upload.
 
 Remote-deleted streams are not restored into the editor. If a previously known stream is absent because it was deleted remotely, the fetch result must note that fact for diagnostics.
 
@@ -189,7 +189,7 @@ Display one row per fetched stream, including disabled rows.
 Columns:
 
 - **Name**: remote stream name plus a visible `Disabled` badge when applicable.
-- **Share**: integer percentage.
+- **Offers**: active offer count and offer editing for offer-capable streams.
 - **Actions**: `Delete` for an active stream or `Restore` for a disabled stream.
 
 Additional behavior:
@@ -203,7 +203,7 @@ Additional behavior:
 - The editor does not create new streams.
 - Unsupported remote stream fields must be preserved by sending partial updates only for managed fields.
 
-Each row exposes an expandable offer list. Offer-based streams support adding, removing, and pinning offers. Pure redirect/action streams, including the Google stream, do not expose offer editing.
+Offer lists are expanded by default and can be collapsed per stream. Offer-based streams support adding, removing, and pinning offers. Pure redirect/action streams, including the Google stream, do not expose offer editing.
 
 ### 6.7 Stream share calculation
 
@@ -221,7 +221,7 @@ Rules:
    - `remainder = 100 mod len(A)`.
    - Assign `base + 1` to the first `remainder` streams in deterministic order and `base` to the rest.
 3. Active shares must total exactly 100 after every mutation.
-4. A zero share is valid but must be visually indicated because that active stream receives no weighted rotation traffic.
+4. A zero share is valid; an active stream with zero share receives no weighted rotation traffic.
 
 Recalculate after deleting or restoring a stream. Stream shares are always redistributed equally; pinning exists only at the offer level (section 6.8).
 
@@ -238,8 +238,8 @@ For each offer-based stream:
 2. Provide **Add offer**, which opens a searchable selector of existing non-deleted Keitaro offers.
 3. Exclude offers already actively associated with that stream.
 4. On add, create or reactivate one local association and redistribute the active offer shares in that stream.
-5. On remove, mark only the association disabled and remove it from the active list. Do not delete or modify the global Keitaro offer.
-6. Re-adding a previously removed offer reactivates its existing association instead of creating a duplicate.
+5. On remove, mark only the local association disabled and remove it from the active list. On upload, delete that association from the Keitaro stream while retaining the disabled local row. Do not delete or modify the global Keitaro offer.
+6. Re-adding a previously removed offer reactivates its local row. If the remote association was deleted by a prior upload, create a fresh remote association instead of reusing its old Keitaro association ID.
 7. An active offer-based stream must contain at least one active offer before upload. The UI may allow the last offer to be removed while the stream is disabled, but restoring that stream requires adding an offer first.
 
 Changing offers within one stream does not change stream-level shares.
@@ -299,6 +299,7 @@ The primary button above the streams table behaves as follows:
 Other states and actions:
 
 - **Discard changes and reload** is available for a dirty draft and requires confirmation.
+- **Hard reset from Kitaro** is available for clean drafts and blocked synchronization states, including `syncing` and `needs_attention`. After confirmation, it discards all local changes, fetches the current Keitaro streams, and replaces the local baseline and draft.
 - Pin changes that do not affect remote-managed data leave the button in its clean state.
 - Validation errors appear next to the affected stream or offer and disable upload.
 - A remote conflict displays a clear message and a reload action; it never silently overwrites either version.
@@ -327,7 +328,7 @@ Before any remote write:
 5. If different, return HTTP 409, perform no remote writes, and preserve the local draft.
 6. If equal, update only streams and associations whose managed fields differ from the baseline.
 
-Use Keitaro partial `PUT` updates. Do not replace the entire campaign or resend unrelated configuration. Map local stream state to Keitaro `active`/`disabled`, stream percentage to `weight`, and offer percentage to association `share`. Removed offer associations are sent as `disabled`.
+Use Keitaro partial `PUT` updates. Do not replace the entire campaign or resend unrelated configuration. Map local stream state to Keitaro `active`/`disabled`, stream percentage to `weight`, and offer percentage to association `share`. Whenever offer associations change, send the stream's complete desired active-offer collection. Removed associations are omitted so Keitaro deletes them from the stream; they remain disabled only in the local draft. Compensation restores the baseline offer collection, recreating removed associations and deleting newly added ones by omission.
 
 Keitaro does not document a transactional compare-and-set operation. The fingerprint preflight is therefore optimistic conflict detection, not a guarantee against a write occurring between the preflight and update calls. The UI and documentation must not claim fully atomic synchronization.
 

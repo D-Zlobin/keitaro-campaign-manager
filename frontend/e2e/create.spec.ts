@@ -25,8 +25,11 @@ test('creates a campaign through the New Campaign dialog and opens its editor', 
 
   const googleRow = page.locator('tr', { hasText: 'Google — DE' })
   const offerRow = page.locator('tr', { hasText: 'Offer — 18002' })
-  await expect(googleRow).toContainText('50%')
-  await expect(offerRow).toContainText('50%')
+  await expect(googleRow).toBeVisible()
+  await expect(offerRow).toBeVisible()
+  await expect(page.locator('.offer-list-item', { hasText: 'Beta Finance Offer' })).toContainText(
+    '100%',
+  )
 
   // A clean draft offers the fetch action.
   await expect(primaryButton(page)).toHaveText('Get streams from Keitaro')

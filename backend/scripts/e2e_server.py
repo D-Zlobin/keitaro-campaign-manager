@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -34,9 +35,10 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from alembic import command as alembic_command  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.db.engine import session_scope  # noqa: E402
-from app.db.models import Base  # noqa: E402
+from app.db.models import Base, SyncState  # noqa: E402
 from app.keitaro.models import KeitaroOffer  # noqa: E402
 from app.main import create_app  # noqa: E402
+from app.repositories.campaigns import CampaignRepository  # noqa: E402
 from tests.fakes import FakeKeitaroAdapter  # noqa: E402
 
 # Deterministic catalog shared with the Playwright specs.
@@ -115,6 +117,14 @@ def build_e2e_app(database_url: str):
             for table in reversed(Base.metadata.sorted_tables):
                 session.execute(table.delete())
         return {"status": "reset"}
+
+    @app.post("/e2e/campaigns/{campaign_id}/syncing")
+    def e2e_mark_syncing(campaign_id: uuid.UUID) -> dict[str, str]:
+        with session_scope(app.state.session_factory) as session:
+            CampaignRepository().transition_sync_state(
+                session, campaign_id=campaign_id, to_state=SyncState.SYNCING
+            )
+        return {"status": "syncing"}
 
     @app.post("/e2e/remote/drift")
     async def e2e_remote_drift(request: Request) -> dict[str, object]:

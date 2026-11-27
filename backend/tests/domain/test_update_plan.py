@@ -148,6 +148,57 @@ def test_removed_association_is_planned_as_disabled() -> None:
     assert is_dirty(draft, baseline) is True
 
 
+def test_offer_change_includes_unchanged_active_associations_for_replacement() -> None:
+    baseline = baseline_document()
+    baseline["streams"][0]["offers"].append(
+        {"id": ASSOCIATION_ID + 1, "offer_id": 18002, "state": "active", "share": 0}
+    )
+    draft = [
+        draft_stream(
+            associations=(
+                DraftAssociationState(
+                    offer_id=18001,
+                    state=OfferAssociationState.ACTIVE,
+                    share=100,
+                    keitaro_association_id=ASSOCIATION_ID,
+                ),
+                DraftAssociationState(
+                    offer_id=18002,
+                    state=OfferAssociationState.DISABLED,
+                    share=0,
+                    keitaro_association_id=ASSOCIATION_ID + 1,
+                ),
+            )
+        )
+    ]
+
+    (update,) = plan_updates(draft, baseline)
+    assert [(a.offer_id, a.state) for a in update.associations] == [
+        (18001, OfferAssociationState.ACTIVE),
+        (18002, OfferAssociationState.DISABLED),
+    ]
+
+
+def test_locally_disabled_association_absent_from_baseline_is_clean() -> None:
+    draft = [
+        draft_stream(
+            associations=(
+                DraftAssociationState(
+                    offer_id=18001,
+                    state=OfferAssociationState.DISABLED,
+                    share=0,
+                    keitaro_association_id=None,
+                ),
+            )
+        )
+    ]
+
+    baseline = baseline_document()
+    baseline["streams"][0]["offers"] = []
+    assert plan_updates(draft, baseline) == []
+    assert is_dirty(draft, baseline) is False
+
+
 def test_reactivated_association_planned_with_state_and_share() -> None:
     document = baseline_document()
     document["streams"][0]["offers"][0]["state"] = "disabled"

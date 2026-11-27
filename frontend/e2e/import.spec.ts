@@ -10,21 +10,19 @@ test('imports an existing Keitaro campaign with active and disabled streams', as
 
   await expect(page.getByText('Clean')).toBeVisible()
 
-  // Active streams with their shares.
-  await expect(streamRow(page, 'Google — DE')).toContainText('50%')
-  const offerRow = streamRow(page, 'Offer — 18001')
-  await expect(offerRow).toContainText('50%')
+  await expect(streamRow(page, 'Google — DE')).toBeVisible()
+  await expect(streamRow(page, 'Offer — 18001')).toBeVisible()
 
   // The disabled remote stream is imported as a visually distinct row.
   const disabledRow = streamRow(page, 'Legacy Stream')
   await expect(disabledRow).toContainText('Disabled')
-  await expect(disabledRow).toContainText('0%')
   await expect(disabledRow.getByRole('button', { name: 'Restore' })).toBeVisible()
 
-  // Offer associations are visible in the expandable offer list.
-  await offerRow.getByRole('button', { name: '1 offer' }).click()
+  // Offer associations are visible by default.
   await expect(page.getByText('Alpha Diet Offer')).toBeVisible()
-  await expect(page.locator('.offer-list')).toContainText('100%')
+  await expect(page.locator('.offer-list').filter({ hasText: 'Alpha Diet Offer' })).toContainText(
+    '100%',
+  )
 })
 
 test('rejects importing the same campaign twice', async ({ page }) => {

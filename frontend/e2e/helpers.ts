@@ -23,6 +23,7 @@ export interface RemoteStream {
   name: string
   state: string
   weight: number | string
+  offers: Array<{ offer_id: number; state: string; share: number }>
 }
 
 /** Read the fake remote's current streams for outcome assertions. */
