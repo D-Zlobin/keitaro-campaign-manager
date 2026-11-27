@@ -138,13 +138,14 @@ def build_e2e_app(database_url: str):
 
     @app.get("/e2e/remote/state")
     def e2e_remote_state(keitaro_campaign_id: int) -> dict[str, object]:
-        """Inspect fake remote state so specs can assert upload outcomes."""
+        """Inspect fake remote state so specs can assert creation and upload outcomes."""
         streams = [
-            stream.model_dump(mode="json")
+            stream.model_dump(mode="json", by_alias=True)
             for stream in keitaro.streams.values()
             if stream.campaign_id == keitaro_campaign_id
         ]
-        return {"streams": streams}
+        campaign = keitaro.campaigns[keitaro_campaign_id].model_dump(mode="json")
+        return {"campaign": campaign, "streams": streams}
 
     if not FRONTEND_DIST.is_dir():
         raise RuntimeError(

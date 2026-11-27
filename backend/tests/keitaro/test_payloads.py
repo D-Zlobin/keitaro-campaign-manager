@@ -1,7 +1,10 @@
+import re
+
 import pytest
 from pydantic import ValidationError
 
 from app.keitaro.payloads import (
+    CampaignCreatePayload,
     OfferAssociationPayload,
     StreamUpdatePayload,
     build_campaign_create_payload,
@@ -14,15 +17,28 @@ def test_campaign_create_payload_matches_verified_contract() -> None:
     payload = build_campaign_create_payload(
         name="Example DE", group_id=10332, traffic_source_id=836, domain_id=1813
     )
-    assert payload.to_api_dict() == {
+    body = payload.to_api_dict()
+    alias = body.pop("alias")
+    assert re.fullmatch(r"[0-9a-f]{12}", alias)
+    assert body == {
         "name": "Example DE",
-        "alias": "",
         "type": "weight",
         "state": "active",
         "group_id": 10332,
         "traffic_source_id": 836,
         "domain_id": 1813,
     }
+
+
+def test_campaign_create_payload_rejects_empty_alias() -> None:
+    with pytest.raises(ValidationError):
+        CampaignCreatePayload(
+            name="Example DE",
+            alias="",
+            group_id=10332,
+            traffic_source_id=836,
+            domain_id=1813,
+        )
 
 
 def test_google_stream_payload_matches_verified_contract() -> None:

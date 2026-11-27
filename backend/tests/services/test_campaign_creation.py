@@ -9,6 +9,7 @@ proof that invalid input performs no remote writes.
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
@@ -70,15 +71,17 @@ def test_create_success_persists_baseline_and_draft(
 
     # Campaign payload uses the configured domain/group/traffic source.
     (campaign_payload,) = fake_keitaro.campaign_payloads
+    alias = campaign_payload.pop("alias")
+    assert re.fullmatch(r"[0-9a-f]{12}", alias)
     assert campaign_payload == {
         "name": "Example DE",
-        "alias": "",
         "type": "weight",
         "state": "active",
         "group_id": 10332,
         "traffic_source_id": 836,
         "domain_id": 1813,
     }
+    assert fake_keitaro.campaigns[500].alias == alias
 
     # Streams: Google first (accept filter + redirect), then the offer stream
     # (reject filter + nested offer at 100%), both at weight 50.
@@ -460,6 +463,28 @@ def test_offer_validation_failure_maps_keitaro_rejection(
 
     assert outcome.status_code == 502
     assert outcome.body["error"]["code"] == "upstream_error"
+
+
+def test_create_rejection_includes_sanitized_upstream_validation_message(
+    service: CampaignService, fake_keitaro: FakeKeitaroAdapter
+) -> None:
+    fake_keitaro.queue_failure(
+        "create_campaign",
+        KeitaroResponseError("create_campaign", 406, '{"error":"alias is required"}'),
+    )
+
+    outcome = service.create_campaign(COMMAND, idempotency_key="key-create-406")
+
+    assert outcome.status_code == 502
+    assert outcome.body["error"] == {
+        "code": "upstream_error",
+        "message": "Keitaro rejected the request (HTTP 406). alias is required",
+        "details": {
+            "upstream_message": "alias is required",
+            "keitaro_campaign_id": None,
+            "cleanup_status": "unknown",
+        },
+    }
 
 
 def test_create_request_schema_normalizes_input() -> None:

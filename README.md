@@ -59,7 +59,9 @@ CORS allows only `CORS_ALLOWED_ORIGINS` (default `http://localhost:5173`).
   recorded result (success or failure) without new remote work; reusing a
   key with a different payload is a 409. Body: `{name, country_code,
   offer_id}` (name trimmed, country normalized to uppercase ISO 3166-1
-  alpha-2). Before any write the backend validates the configured
+  alpha-2). The backend generates a unique non-empty campaign alias because
+  the target Keitaro instance rejects empty aliases. Before any write the
+  backend validates the configured
   domain/group/traffic source and offer availability; on incomplete setup
   it stops and attempts a compensating campaign archive, reporting
   `keitaro_campaign_id` and `cleanup_status` in the error details.

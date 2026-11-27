@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { primaryButton, resetBackend } from './helpers'
+import { primaryButton, remoteState, resetBackend } from './helpers'
 
 test.beforeEach(async ({ request }) => {
   await resetBackend(request)
@@ -7,6 +7,7 @@ test.beforeEach(async ({ request }) => {
 
 test('creates a campaign through the New Campaign dialog and opens its editor', async ({
   page,
+  request,
 }) => {
   await page.goto('/')
   await page.getByRole('button', { name: 'New Campaign' }).click()
@@ -33,6 +34,48 @@ test('creates a campaign through the New Campaign dialog and opens its editor', 
 
   // A clean draft offers the fetch action.
   await expect(primaryButton(page)).toHaveText('Get streams from Keitaro')
+
+  const campaignsResponse = await request.get('/api/v1/campaigns')
+  expect(campaignsResponse.ok()).toBeTruthy()
+  const { campaigns } = (await campaignsResponse.json()) as {
+    campaigns: Array<{ name: string; keitaro_id: number }>
+  }
+  const created = campaigns.find((campaign) => campaign.name === 'E2E Created Campaign')!
+  const remote = await remoteState(request, created.keitaro_id)
+
+  expect(remote.campaign).toMatchObject({
+    name: 'E2E Created Campaign',
+    type: 'weight',
+    state: 'active',
+    domain_id: 1813,
+    group_id: 10332,
+    traffic_source_id: 836,
+  })
+  expect(remote.streams).toHaveLength(2)
+  const [google, offer] = [...remote.streams].sort((a, b) => a.position - b.position)
+  expect(google).toMatchObject({
+    name: 'Google — DE',
+    type: 'regular',
+    schema: 'redirect',
+    state: 'active',
+    position: 0,
+    weight: 50,
+    action_type: 'redirect',
+    action_payload: 'https://www.google.com/',
+    filters: [{ name: 'country', mode: 'accept', payload: ['DE'] }],
+    offers: [],
+  })
+  expect(offer).toMatchObject({
+    name: 'Offer — 18002',
+    type: 'regular',
+    schema: 'landings',
+    state: 'active',
+    position: 1,
+    weight: 50,
+    action_type: 'http',
+    filters: [{ name: 'country', mode: 'reject', payload: ['DE'] }],
+    offers: [{ offer_id: 18002, state: 'active', share: 100 }],
+  })
 
   // The created campaign appears in the list.
   await page.goto('/')

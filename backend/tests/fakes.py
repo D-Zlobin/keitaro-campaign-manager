@@ -260,13 +260,15 @@ class FakeKeitaroAdapter:
         if self.create_campaign_delay:
             time.sleep(self.create_campaign_delay)
         self._maybe_fail("create_campaign")
+        if not payload.alias:
+            raise KeitaroResponseError("create_campaign", 406, '{"error":"alias is required"}')
         campaign_id = self._next_campaign_id
         self._next_campaign_id += 1
         now = self._tick()
         campaign = KeitaroCampaign(
             id=campaign_id,
             name=payload.name,
-            alias=f"alias{campaign_id}",
+            alias=payload.alias,
             type=payload.type,
             state=payload.state,
             group_id=payload.group_id,

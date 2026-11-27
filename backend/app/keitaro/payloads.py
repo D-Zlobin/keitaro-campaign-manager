@@ -8,6 +8,8 @@ Verification status (plan stage 0):
   OpenAPI reference (admin-api.docs.keitaro.io), ``POST /campaigns``
   requiring ``alias`` + ``name`` and ``POST /streams`` requiring
   ``campaign_id``, ``schema``, ``type``, ``name`` and ``action_type``.
+  The target instance rejects an empty alias despite the public reference,
+  so campaign creation generates a URL-safe 12-character hexadecimal alias.
 - Offer-capable streams use the public schema name ``landings`` with nested
   ``offers: [{offer_id, share, state}]``; association shares are integers.
 - On the target instance every UI-created ``landings`` stream carries
@@ -22,6 +24,7 @@ Verification status (plan stage 0):
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -57,9 +60,13 @@ class KeitaroPayload(BaseModel):
         return self.model_dump(by_alias=True, exclude_none=True)
 
 
+def _generate_campaign_alias() -> str:
+    return uuid.uuid4().hex[:12]
+
+
 class CampaignCreatePayload(KeitaroPayload):
     name: str
-    alias: str = ""
+    alias: str = Field(default_factory=_generate_campaign_alias, min_length=1)
     type: str = CAMPAIGN_ROTATION_WEIGHT
     state: str = CAMPAIGN_STATE_ACTIVE
     group_id: int

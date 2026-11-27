@@ -25,6 +25,7 @@ discards it.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import uuid
 from collections.abc import Collection
@@ -168,11 +169,32 @@ def _request_hash(command: CreateCampaignCommand) -> str:
     return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
 
 
+def _upstream_response_message(exc: KeitaroResponseError) -> str | None:
+    try:
+        body = json.loads(exc.snippet)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(body, dict):
+        return None
+    for key in ("error", "message"):
+        value = body.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def _upstream_error(exc: KeitaroClientError) -> AppError:
     if isinstance(exc, KeitaroTimeoutError):
         return UpstreamTimeoutError("Keitaro did not respond in time. Try again.")
     if isinstance(exc, KeitaroResponseError):
-        return UpstreamError(f"Keitaro rejected the request (HTTP {exc.status_code}).")
+        message = f"Keitaro rejected the request (HTTP {exc.status_code})."
+        response_message = _upstream_response_message(exc)
+        if response_message:
+            return UpstreamError(
+                f"{message} {response_message}",
+                details={"upstream_message": response_message},
+            )
+        return UpstreamError(message)
     if isinstance(exc, KeitaroInvalidResponseError):
         return UpstreamError("Keitaro returned an unexpected response.")
     return UpstreamError("Keitaro could not be reached.")
