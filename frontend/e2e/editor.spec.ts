@@ -64,7 +64,7 @@ test('hard reset discards local state and reloads streams from Keitaro', async (
   await panel.getByRole('button', { name: 'Pin' }).click()
   await expect(panel.getByText('Pinned')).toBeVisible()
 
-  const hardReset = page.getByRole('button', { name: 'Hard reset from Kitaro' })
+  const hardReset = page.getByRole('button', { name: 'Hard reset from Keitaro' })
   await expect(hardReset).toHaveClass(/danger/)
   await hardReset.click()
   await page.getByRole('button', { name: 'Confirm hard reset' }).click()
@@ -82,7 +82,7 @@ test('hard reset recovers a campaign stuck in syncing', async ({ page, request }
   await page.reload()
   await expect(page.getByText('Syncing', { exact: true })).toBeVisible()
 
-  const hardReset = page.getByRole('button', { name: 'Hard reset from Kitaro' })
+  const hardReset = page.getByRole('button', { name: 'Hard reset from Keitaro' })
   await expect(hardReset).toBeEnabled()
   await hardReset.click()
   await page.getByRole('button', { name: 'Confirm hard reset' }).click()

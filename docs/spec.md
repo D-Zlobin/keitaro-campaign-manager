@@ -299,7 +299,7 @@ The primary button above the streams table behaves as follows:
 Other states and actions:
 
 - **Discard changes and reload** is available for a dirty draft and requires confirmation.
-- **Hard reset from Kitaro** is available for clean drafts and blocked synchronization states, including `syncing` and `needs_attention`. After confirmation, it discards all local changes, fetches the current Keitaro streams, and replaces the local baseline and draft.
+- **Hard reset from Keitaro** is available for clean drafts and blocked synchronization states, including `syncing` and `needs_attention`. After confirmation, it discards all local changes, fetches the current Keitaro streams, and replaces the local baseline and draft.
 - Pin changes that do not affect remote-managed data leave the button in its clean state.
 - Validation errors appear next to the affected stream or offer and disable upload.
 - A remote conflict displays a clear message and a reload action; it never silently overwrites either version.

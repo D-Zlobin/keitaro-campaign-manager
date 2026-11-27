@@ -232,7 +232,7 @@ export function CampaignEditorPage({ campaignId }: CampaignEditorPageProps) {
           </button>
           {(!dirty || blocked) && (
             <ConfirmButton
-              label="Hard reset from Kitaro"
+              label="Hard reset from Keitaro"
               question="Discard all local changes and replace them with streams from Keitaro?"
               confirmLabel="Confirm hard reset"
               className="danger"

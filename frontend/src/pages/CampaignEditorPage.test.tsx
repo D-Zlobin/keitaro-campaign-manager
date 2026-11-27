@@ -79,7 +79,7 @@ describe('CampaignEditorPage — primary synchronization button', () => {
     ).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Pin' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Remove' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Hard reset from Kitaro' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Hard reset from Keitaro' })).toBeEnabled()
   })
 
   it('offers hard reset when synchronization is stuck', async () => {
@@ -91,7 +91,7 @@ describe('CampaignEditorPage — primary synchronization button', () => {
     )
 
     expect(await screen.findByRole('button', { name: 'Get streams from Keitaro' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Hard reset from Kitaro' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Hard reset from Keitaro' })).toBeEnabled()
   })
 })
 
@@ -409,7 +409,7 @@ describe('CampaignEditorPage — fetch, discard, and conflicts', () => {
     ])
     const user = userEvent.setup()
 
-    const hardReset = await screen.findByRole('button', { name: 'Hard reset from Kitaro' })
+    const hardReset = await screen.findByRole('button', { name: 'Hard reset from Keitaro' })
     expect(hardReset).toHaveClass('danger')
     await user.click(hardReset)
     expect(fetches).toBe(0)
